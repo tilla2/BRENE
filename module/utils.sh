@@ -146,7 +146,7 @@ brene_spoof_system_properties() {
 	resetprop_n "init.svc_debug_pid.adbd" ""
 	resetprop_n "persist.sys.usb.config" "mtp"
 	resetprop_n "ro.adb.secure" "1"
-	resetprop_n "ro.crypto.state" "encrypted"
+	# ro.crypto.state is set in boot-completed.sh (PR #61: preserve vendor crypto transition triggers)
 	resetprop_n "ro.debuggable" "0"
 	resetprop_n "ro.force.debuggable" "0"
 	if_prop_exits_resetprop_n "ro.secureboot.devicelock" "1"

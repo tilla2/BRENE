@@ -73,6 +73,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_selinux) config_selinux="$v" ;;
       config_selinux_hide) config_selinux_hide="$v" ;;
       config_show_refresh_rate) config_show_refresh_rate="$v" ;;
+      config_shrink_buffer_size) config_shrink_buffer_size="$v" ;;
       config_spoof_cmdline_or_bootconfig) config_spoof_cmdline_or_bootconfig="$v" ;;
       config_spoof_date_properties) config_spoof_date_properties="$v" ;;
       config_spoof_fingerprint_properties) config_spoof_fingerprint_properties="$v" ;;
@@ -114,7 +115,7 @@ kernel_version=$(cat /proc/version 2>/dev/null | awk '{print $3}' | grep -oE '^[
 kernel_version=${kernel_version:-unknown}
 susfs_ver=${susfs_ver:-missing}
 susfs_variant=${susfs_variant:-unknown}
-description="A SuSFS/KernelSU module for SuSFS patched kernels"
+description="KernelSU module with SuSFS support and more"
 if [[ "${susfs_ver}" == "v2"* ]]; then
 	${KSU_BIN} module config set override.description "[Module Status: ✅ | Kernel: ${kernel_version} | SuSFS Patches: ✅ ${susfs_ver} (${susfs_variant}) | SuSFS Features: ${susfs_features_number}/${susfs_total_features}] ${description}" 2>/dev/null || true
 else
@@ -167,7 +168,8 @@ fi
 
 # Disable Child Process Restrictions
 if [[ "${config_disable_child_process_restrictions}" == "1" ]]; then
-        resetprop_n persist.sys.fflag.override.settings_enable_monitor_phantom_procs false
+        resetprop -n -p persist.sys.fflag.override.settings_enable_monitor_phantom_procs false 2>/dev/null \
+                || resetprop_n persist.sys.fflag.override.settings_enable_monitor_phantom_procs false
 fi
 
 # SELinux Enforcing
@@ -275,6 +277,11 @@ fi
 if [[ "${config_show_refresh_rate}" == "1" ]]; then
     command -v service >/dev/null 2>&1 && service call SurfaceFlinger 1034 i32 1
 fi
+# Set logcat and logd buffer to 64K (fail-safe: never blocks boot)
+if [[ "${config_shrink_buffer_size}" == "1" ]]; then
+	command -v logcat >/dev/null 2>&1 && logcat -G 64K >/dev/null 2>&1
+	resetprop -n -p persist.logd.size 65536 2>/dev/null || resetprop_n persist.logd.size 65536
+fi
 
 #### Hide some sus paths, effective only for processes that are marked umounted with uid >= 10000 ####
 # Spoof Android System Properties
@@ -304,6 +311,11 @@ fi
 
 ## First we need to wait until files are accessible in /sdcard ##
 _wait_count=0; until [[ -e "/sdcard/Android" ]] || [[ "${_wait_count}" -ge 10 ]]; do sleep 1; _wait_count=$((_wait_count + 1)); done
+# PR #61: set ro.crypto.state after boot completed and vold settled so the
+# encrypted transition still reaches vendor init triggers
+if [[ "${config_spoof_system_properties}" == "1" ]]; then
+	if_prop_exits_resetprop_n "ro.crypto.state" "encrypted" || true
+fi
 # Helper: wait until DIR shows at least one entry (dent existence alone is not
 # enough — FUSE/vold can create the mountpoint before readdir returns entries).
 # Bounded only; never blocks boot. rc=0 when non-empty, 1 on timeout.

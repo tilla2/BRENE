@@ -78,7 +78,7 @@ kernel_version=${kernel_version:-unknown}
 susfs_variant=$(${SUSFS_BIN} show variant 2>/dev/null)
 susfs_features_number=$(${SUSFS_BIN} show enabled_features 2>/dev/null | wc -l)
 susfs_total_features=9
-${KSU_BIN} module config set override.description "[Module Status: ⏱️ | Kernel: ${kernel_version} | SuSFS Patches: ⏱️ ${susfs_ver} (${susfs_variant}) | SuSFS Features: ${susfs_features_number}/${susfs_total_features}] A SuSFS/KernelSU module for SuSFS patched kernels"
+${KSU_BIN} module config set override.description "[Module Status: ⏱️ | Kernel: ${kernel_version} | SuSFS Patches: ⏱️ ${susfs_ver} (${susfs_variant}) | SuSFS Features: ${susfs_features_number}/${susfs_total_features}] KernelSU module with SuSFS support and more"
 
 # Disable other SuSFS modules
 [[ -e "${KSU_MODULES_DIR}/susfs4ksu" ]] && {
@@ -88,7 +88,7 @@ ${KSU_BIN} module config set override.description "[Module Status: ⏱️ | Kern
 	touch "${KSU_MODULES_DIR}/susfs_manager/disable" && echo '[✅] Disabling other SuSFS module'
 }
 
-echo '[✅] Preparing brene persistent directory (/data/adb/brene)'
+echo "[✅] Preparing brene persistent directory (${PERSISTENT_DIR})"
 mkdir -p "${PERSISTENT_DIR}"
 chmod 700 "${PERSISTENT_DIR}" || true
 
@@ -198,8 +198,9 @@ else
 	_brene_pair=""; _brene_old_key=""; _brene_new_key=""; _brene_old_val=""; _brene_def_val=""
 fi
 
-# Remove fake_files folder
+# Reset fake_files folder
 [[ -d "${PERSISTENT_DIR}/fake_files" ]] && rm -rf "${PERSISTENT_DIR}/fake_files"
+mkdir -p "${PERSISTENT_DIR}/fake_files"
 
 # Enable WebUI without reboot (keep id in sync with module.prop)
 MODDIR="/data/adb/modules/brene"

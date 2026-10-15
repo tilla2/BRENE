@@ -72,6 +72,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_selinux) config_selinux="$v" ;;
       config_selinux_hide) config_selinux_hide="$v" ;;
       config_show_refresh_rate) config_show_refresh_rate="$v" ;;
+      config_shrink_buffer_size) config_shrink_buffer_size="$v" ;;
       config_spoof_cmdline_or_bootconfig) config_spoof_cmdline_or_bootconfig="$v" ;;
       config_spoof_date_properties) config_spoof_date_properties="$v" ;;
       config_spoof_fingerprint_properties) config_spoof_fingerprint_properties="$v" ;;
