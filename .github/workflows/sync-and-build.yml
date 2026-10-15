@@ -12,6 +12,9 @@ permissions:
   contents: read
   issues: write
 
+env:
+  CUSTOM_REPO: tilla2/BRENE
+
 concurrency:
   group: sync-and-build-main
   cancel-in-progress: false
@@ -39,21 +42,26 @@ jobs:
           if [ "${ACTUAL_SUSFS_SHA256}" != "${PINNED_SUSFS_SHA256}" ]; then
             echo "::error::susfs hash mismatch: expected ${PINNED_SUSFS_SHA256}, got ${ACTUAL_SUSFS_SHA256}" >&2; exit 1
           fi
+          echo "✅ Verify susfs binary hash"
 
       - name: Configure git identity
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "✅ Configure git identity"
 
       - name: Record current HEAD
         id: pre
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "✅ Record current HEAD"
 
       - name: Add upstream and fetch
         run: |
           # TODO: pin upstream to a fixed URL/mirror; review if upstream moves.
           git remote add upstream https://github.com/rrr333nnn333/BRENE.git || git remote set-url upstream https://github.com/rrr333nnn333/BRENE.git
           git fetch upstream main
+          echo "✅ Add upstream and fetch"
 
       - name: Try merging upstream
         id: merge
@@ -99,6 +107,7 @@ jobs:
               echo "conflict=false" >> "$GITHUB_OUTPUT"
             fi
           fi
+          echo "✅ Try merging upstream"
 
       - name: Open issue on conflict
         if: steps.merge.outputs.conflict == 'true'
@@ -123,6 +132,7 @@ jobs:
           COUNT=$(git rev-list --count ${{ steps.pre.outputs.sha }}..$NEW_SHA)
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "new_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+          echo "✅ Check for new upstream commits"
 
       - name: Re-apply customizations onto module/
         if: steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
@@ -145,10 +155,11 @@ jobs:
           sed -i "s/^name=.*/name=.BRENE - Custom AI/" module/module.prop
           sed -i "s/^author=.*/author=rrr333nnn333, simonpunk \& KOWX712 + Community/" module/module.prop
           if grep -q "^updateJson=" module/module.prop; then
-            sed -i "s#^updateJson=.*#updateJson=https://raw.githubusercontent.com/Tomkun-desu/BRENE/main/update.json#" module/module.prop
+            sed -i "s#^updateJson=.*#updateJson=https://raw.githubusercontent.com/tilla2/BRENE/main/update.json#" module/module.prop
           else
-            echo "updateJson=https://raw.githubusercontent.com/Tomkun-desu/BRENE/main/update.json" >> module/module.prop
+            echo "updateJson=https://raw.githubusercontent.com/tilla2/BRENE/main/update.json" >> module/module.prop
           fi
+          echo "✅ Re-apply customizations onto module/"
 
       - name: Neutralize redundant upstream fingerprint spoofing
         if: steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
@@ -210,6 +221,7 @@ jobs:
                   f.write(content)
 
           PYEOF
+          echo "✅ Neutralize redundant upstream fingerprint spoofing"
 
       - name: Capture diff against pure upstream
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
@@ -218,38 +230,16 @@ jobs:
           mkdir -p /tmp/upstream_pure
           git archive upstream/main -- module | tar -x -C /tmp/upstream_pure
           diff -ruN /tmp/upstream_pure/module module | head -c 2000 > /tmp/custom.diff || true
+          echo "✅ Capture diff against pure upstream"
 
-      - name: Summarize with Cloudflare Workers AI (free)
+      - name: Summarize local customizations (Cloudflare AI disabled)
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
-          command -v jq >/dev/null || { echo "- (summary unavailable: jq missing)" > /tmp/ai_summary.md; cat /tmp/ai_summary.md; exit 0; }
-          if [ ! -s /tmp/custom.diff ]; then
-            echo "- No local changes this build." > /tmp/ai_summary.md
-          else
-            RESPONSE=$(jq -n --rawfile diff /tmp/custom.diff '
-              {
-                messages: [
-                  {role: "system", content: "You summarize code diffs in plain, simple bullet points for non-technical readers. One line per change. No code snippets. No headers."},
-                  {role: "user", content: ("This is a diff comparing a customized KernelSU/SuSFS module fork against its pure upstream original. Summarize what was locally added, changed, or removed:\n\n" + $diff)}
-                ]
-              }' | curl -sS --fail --proto '=https' --tlsv1.2 --retry 2 --max-time 60 "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.1-8b-instruct" \
-                -H "Authorization: Bearer ${CF_API_TOKEN}" \
-                -H "Content-Type: application/json" \
-                --data-binary @-)
-
-            echo "$RESPONSE" > /tmp/cf_raw_response.json
-            echo "$RESPONSE" | jq -re '.result.response // empty' > /tmp/ai_summary.md || true
-
-            if [ ! -s /tmp/ai_summary.md ]; then
-              echo "- (summary unavailable this run)" > /tmp/ai_summary.md
-              echo "---- Cloudflare response (redacted, size only) ----"
-              echo "response bytes: $(wc -c < /tmp/cf_raw_response.json 2>/dev/null || echo 0)"
-            fi
-          fi
+          # Cloudflare Workers AI call neutralized: no CF_ACCOUNT_ID / CF_API_TOKEN required.
+          echo "(summary unavailable)" > /tmp/ai_summary.md
+          [ -s /tmp/ai_summary.md ] || { echo "::error::failed to write /tmp/ai_summary.md" >&2; exit 1; }
           cat /tmp/ai_summary.md
+          echo "✅ summary placeholder written"
 
       - name: Build changelog and release
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
@@ -264,6 +254,8 @@ jobs:
           PREV_NUM=$(cat BUILD_NUMBER 2>/dev/null || echo 0)
           PREV_NUM=$(printf '%s' "$PREV_NUM" | grep -oE '[0-9]+' | head -1)
           [ -z "$PREV_NUM" ] && PREV_NUM=0
+          # BUILD_NUMBER floor: never build below 24 (baseline after v0.0.70-custom.1 = 23).
+          if [ "$PREV_NUM" -lt 24 ]; then PREV_NUM=24; fi
           # versionCode must NEVER reset: root managers (KernelSU/Magisk/APatch)
           # detect updates by strictly increasing versionCode, so BUILD_NUMBER
           # only ever goes up even when the display counter restarts below.
@@ -301,10 +293,13 @@ jobs:
           mv /tmp/full_changelog.md CHANGELOG.md
 
           sed -i "s/^version=.*/version=${BUILD_VERSION}/" module/module.prop
+          sed -i "s#^updateJson=.*#updateJson=https://raw.githubusercontent.com/${CUSTOM_REPO}/main/update.json#" module/module.prop
+          grep -q "^updateJson=https://raw.githubusercontent.com/${CUSTOM_REPO}/main/update.json" module/module.prop || { echo "::error::updateJson rebrand failed" >&2; exit 1; }
           sed -i "s/^versionCode=.*/versionCode=${RUN_NUM}/" module/module.prop
 
           echo "build_version=${BUILD_VERSION}" >> "$GITHUB_OUTPUT"
           echo "run_num=${RUN_NUM}" >> "$GITHUB_OUTPUT"
+          echo "✅ Build changelog and release"
 
       - name: Update update.json
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
@@ -317,6 +312,7 @@ jobs:
             "changelog": "https://raw.githubusercontent.com/${{ github.repository }}/main/CHANGELOG.md"
           }
           EOF
+          echo "✅ Update update.json"
 
       - name: Commit and push
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true'
@@ -324,6 +320,7 @@ jobs:
           git add module update.json CHANGELOG.md BUILD_NUMBER LAST_UPSTREAM_VERSION
           git commit -m "release: ${{ steps.build.outputs.build_version }}"
           git push origin main
+          echo "✅ Commit and push"
 
       - name: Commit and push (sync only, no release)
         if: steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0' && github.event.inputs.publish != 'true'
@@ -335,6 +332,7 @@ jobs:
             git commit -m "chore: sync upstream changes (no release published)"
           fi
           git push origin main
+          echo "✅ Commit and push (sync only, no release)"
 
       - name: Zip module (only module/ contents at zip root)
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
@@ -345,6 +343,7 @@ jobs:
           unzip -l "../BRENE-Custom-AI-${{ steps.build.outputs.build_version }}.zip"
           zip -T "../BRENE-Custom-AI-${{ steps.build.outputs.build_version }}.zip"
           cd ..
+          echo "✅ Zip module (only module/ contents at zip root)"
 
       - name: Check tag absence
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
@@ -355,6 +354,7 @@ jobs:
           else
             echo "Tag ${{ steps.build.outputs.build_version }} not present, proceeding."
           fi
+          echo "✅ Check tag absence"
 
       - name: Create Release
         if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
