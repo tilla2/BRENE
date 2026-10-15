@@ -75,6 +75,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_selinux) config_selinux="$v" ;;
       config_selinux_hide) config_selinux_hide="$v" ;;
       config_show_refresh_rate) config_show_refresh_rate="$v" ;;
+      config_shrink_buffer_size) config_shrink_buffer_size="$v" ;;
       config_spoof_cmdline_or_bootconfig) config_spoof_cmdline_or_bootconfig="$v" ;;
       config_spoof_date_properties) config_spoof_date_properties="$v" ;;
       config_spoof_fingerprint_properties) config_spoof_fingerprint_properties="$v" ;;
@@ -499,7 +500,7 @@ fi
 
 # Load custom_open_redirect.txt
 # Format per line (TAB-separated): <src><TAB><dst><TAB><uid_scheme>
-# Example: /system/etc/hosts<TAB>/data/adb/brene/fake_files/hosts<TAB>3
+# Example: /system/etc/hosts<TAB>/data/adb/brene/fake_files/_system_etc_hosts<TAB>3
 # uid_scheme: 0 non-app (uid<10000), 1 non-su uid 0, 2 non-su,
 #             3 umounted uid>=10000 (default), 4 umounted
 # NOTE: dst is NOT auto-created and SELinux is NOT auto-fixed here;
@@ -539,7 +540,21 @@ fi
 # Spoof /system/etc/hosts
 if [[ "${config_spoof_hosts}" == "1" ]]; then
     path=/system/etc/hosts
-    ${SUSFS_BIN} add_sus_kstat_statically "${path}" '100' 'default' 'default' '64' 'default' 'default' 'default' 'default' 'default' 'default' '1' '4096' 2>/dev/null || true
+    safe="$(printf '%s' "${path}" | tr '/' '_')"
+    fake_file_path="${PERSISTENT_DIR}/fake_files/${safe}"
+
+    # Serve a stock (AOSP) hosts file via open_redirect
+    [[ ! -d "${PERSISTENT_DIR}/fake_files" ]] && mkdir -p "${PERSISTENT_DIR}/fake_files"
+    busybox chcon --reference="${path}" "${PERSISTENT_DIR}/fake_files" 2>/dev/null || true
+    [ -L "${fake_file_path}" ] && rm -f -- "${fake_file_path}"
+    [[ ! -f "${fake_file_path}" ]] && printf '127.0.0.1       localhost\n::1             ip6-localhost\n\n' > "${fake_file_path}"
+
+    brene_clone_perm "${fake_file_path}" "${path}" || true
+    brene_open_redirect "${path}" "${fake_file_path}" '3' || true
+
+    # add_sus_kstat_statically </path> <ino> <dev> <nlink> <size> <atime> <atime_nsec> <mtime> <mtime_nsec> <ctime> <ctime_nsec> <blocks> <blksize>
+    # size 56 = byte size of the stock hosts file above
+    ${SUSFS_BIN} add_sus_kstat_statically "${path}" '100' 'default' 'default' '56' 'default' 'default' 'default' 'default' 'default' 'default' '1' '4096' 2>/dev/null || true
 fi
 
 # Spoof Android System Properties
