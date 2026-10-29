@@ -3,6 +3,10 @@ name: Sync upstream and build release
 on:
   workflow_dispatch:
     inputs:
+      sync:
+        description: 'Fetch and merge upstream BRENE first (uncheck to build this branch as-is)'
+        type: boolean
+        default: true
       publish:
         description: 'Publish a release right now (leave unchecked to only sync upstream)'
         type: boolean
@@ -13,7 +17,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: sync-and-build-main
+  group: sync-and-build-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -24,8 +28,8 @@ jobs:
       contents: write
       issues: write
     steps:
-      - name: Checkout main (full history)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout (full history)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -50,12 +54,13 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Add upstream and fetch
+        if: inputs.sync == true
         run: |
-          # TODO: pin upstream to a fixed URL/mirror; review if upstream moves.
           git remote add upstream https://github.com/rrr333nnn333/BRENE.git || git remote set-url upstream https://github.com/rrr333nnn333/BRENE.git
           git fetch upstream main
 
       - name: Try merging upstream
+        if: inputs.sync == true
         id: merge
         run: |
           # NOTE: .github is intentionally not protected so upstream workflow fixes still merge.
@@ -102,7 +107,7 @@ jobs:
 
       - name: Open issue on conflict
         if: steps.merge.outputs.conflict == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const TITLE_PREFIX = "Upstream sync conflict";
@@ -116,7 +121,7 @@ jobs:
             })
 
       - name: Check for new upstream commits
-        if: steps.merge.outputs.conflict == 'false'
+        if: inputs.sync == true && steps.merge.outputs.conflict == 'false'
         id: diff
         run: |
           NEW_SHA=$(git rev-parse HEAD)
@@ -125,7 +130,7 @@ jobs:
           echo "new_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Re-apply customizations onto module/
-        if: steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
+        if: inputs.sync == true && steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
         run: |
           # config_sync_device_props is merged into config_spoof_system_properties
           # (OR-migration shims in post-fs-data.sh / boot-completed.sh). Verify
@@ -145,13 +150,13 @@ jobs:
           sed -i "s/^name=.*/name=.BRENE - Custom AI/" module/module.prop
           sed -i "s/^author=.*/author=rrr333nnn333, simonpunk \& KOWX712 + Community/" module/module.prop
           if grep -q "^updateJson=" module/module.prop; then
-            sed -i "s#^updateJson=.*#updateJson=https://raw.githubusercontent.com/Tomkun-desu/BRENE/main/update.json#" module/module.prop
+            sed -i "s#^updateJson=.*#updateJson=https://raw.githubusercontent.com/${{ github.repository }}/main/update.json#" module/module.prop
           else
-            echo "updateJson=https://raw.githubusercontent.com/Tomkun-desu/BRENE/main/update.json" >> module/module.prop
+            echo "updateJson=https://raw.githubusercontent.com/${{ github.repository }}/main/update.json" >> module/module.prop
           fi
 
       - name: Neutralize redundant upstream fingerprint spoofing
-        if: steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
+        if: inputs.sync == true && steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
         run: |
           python3 << 'PYEOF'
           path = "module/utils.sh"
@@ -196,14 +201,14 @@ jobs:
               print("Removed redundant upstream fingerprint block from utils.sh")
               removed_any = True
           else:
-              print("::warning::Fingerprint block not found (already clean or upstream changed it) -- nothing to do")
+              print("note: fingerprint block not found (already clean or upstream changed it) -- nothing to do")
 
           if old_utc in content:
               content = content.replace(old_utc, new_block_utc, 1)
               print("Removed redundant upstream UTC date block from utils.sh (already covered by config_spoof_system_properties)")
               removed_any = True
           else:
-              print("::warning::UTC block not found (already clean or upstream changed it) -- nothing to do")
+              print("note: UTC block not found (already clean or upstream changed it) -- nothing to do")
 
           if removed_any:
               with open(path, "w") as f:
@@ -211,53 +216,29 @@ jobs:
 
           PYEOF
 
-      - name: Capture diff against pure upstream
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
+      - name: Capture local-vs-upstream change summary
+        if: inputs.sync == true && steps.merge.outputs.conflict != 'true' && inputs.publish == true
         run: |
           rm -rf /tmp/upstream_pure
           mkdir -p /tmp/upstream_pure
           git archive upstream/main -- module | tar -x -C /tmp/upstream_pure
-          diff -ruN /tmp/upstream_pure/module module | head -c 2000 > /tmp/custom.diff || true
-
-      - name: Summarize with Cloudflare Workers AI (free)
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: |
-          command -v jq >/dev/null || { echo "- (summary unavailable: jq missing)" > /tmp/ai_summary.md; cat /tmp/ai_summary.md; exit 0; }
-          if [ ! -s /tmp/custom.diff ]; then
-            echo "- No local changes this build." > /tmp/ai_summary.md
-          else
-            RESPONSE=$(jq -n --rawfile diff /tmp/custom.diff '
-              {
-                messages: [
-                  {role: "system", content: "You summarize code diffs in plain, simple bullet points for non-technical readers. One line per change. No code snippets. No headers."},
-                  {role: "user", content: ("This is a diff comparing a customized KernelSU/SuSFS module fork against its pure upstream original. Summarize what was locally added, changed, or removed:\n\n" + $diff)}
-                ]
-              }' | curl -sS --fail --proto '=https' --tlsv1.2 --retry 2 --max-time 60 "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.1-8b-instruct" \
-                -H "Authorization: Bearer ${CF_API_TOKEN}" \
-                -H "Content-Type: application/json" \
-                --data-binary @-)
-
-            echo "$RESPONSE" > /tmp/cf_raw_response.json
-            echo "$RESPONSE" | jq -re '.result.response // empty' > /tmp/ai_summary.md || true
-
-            if [ ! -s /tmp/ai_summary.md ]; then
-              echo "- (summary unavailable this run)" > /tmp/ai_summary.md
-              echo "---- Cloudflare response (redacted, size only) ----"
-              echo "response bytes: $(wc -c < /tmp/cf_raw_response.json 2>/dev/null || echo 0)"
-            fi
-          fi
-          cat /tmp/ai_summary.md
+          # deterministic file-level summary; no external AI service, no secrets
+          diff -rq /tmp/upstream_pure/module module > /tmp/custom_files.txt 2>&1 || true
+          sed -e 's|/tmp/upstream_pure/||g' -e 's|^|- |' /tmp/custom_files.txt > /tmp/local_summary.md || true
+          [ -s /tmp/local_summary.md ] || echo "- No local changes against upstream this build." > /tmp/local_summary.md
+          cat /tmp/local_summary.md
 
       - name: Build changelog and release
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
         id: build
         run: |
           DATE=$(date -u +%Y-%m-%d)
 
-          UPSTREAM_VER=$(git show upstream/main:module/module.prop | grep '^version=' | grep -oE 'v[0-9.]+' | head -1)
+          if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then
+            UPSTREAM_VER=$(git show upstream/main:module/module.prop | grep '^version=' | grep -oE 'v[0-9.]+' | head -1)
+          else
+            UPSTREAM_VER=$(grep '^version=' module/module.prop | grep -oE 'v[0-9.]+' | head -1)
+          fi
           [ -z "$UPSTREAM_VER" ] && UPSTREAM_VER="v0.0.0"
 
           LAST_VER=$(cat LAST_UPSTREAM_VERSION 2>/dev/null || echo "")
@@ -281,7 +262,9 @@ jobs:
             [ "$CUSTOM_N" -lt 1 ] && CUSTOM_N=1
           fi
 
-          UPSTREAM_LOG=$(git log --pretty=format:"- %s" ${{ steps.pre.outputs.sha }}..${{ steps.diff.outputs.new_sha }} -- module ':!CHANGELOG.md' 2>/dev/null || echo "")
+          RANGE_TO="${{ steps.diff.outputs.new_sha }}"
+          [ -n "$RANGE_TO" ] || RANGE_TO="${{ steps.pre.outputs.sha }}"
+          UPSTREAM_LOG=$(git log --pretty=format:"- %s" "${{ steps.pre.outputs.sha }}..$RANGE_TO" -- module ':!CHANGELOG.md' 2>/dev/null || echo "")
           [ -z "$UPSTREAM_LOG" ] && UPSTREAM_LOG="- (manual rebuild, no new upstream commits)"
 
           BUILD_VERSION="${UPSTREAM_VER}-custom.${CUSTOM_N}"
@@ -293,7 +276,7 @@ jobs:
             echo "$UPSTREAM_LOG"
             echo ""
             echo "### Local customizations"
-            cat /tmp/ai_summary.md
+            cat /tmp/local_summary.md 2>/dev/null || echo "- (no upstream comparison this run; built from branch as-is)"
             echo ""
           } > /tmp/new_entry.md
 
@@ -307,7 +290,7 @@ jobs:
           echo "run_num=${RUN_NUM}" >> "$GITHUB_OUTPUT"
 
       - name: Update update.json
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
         run: |
           cat > update.json << EOF
           {
@@ -319,14 +302,14 @@ jobs:
           EOF
 
       - name: Commit and push
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true'
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
         run: |
           git add module update.json CHANGELOG.md BUILD_NUMBER LAST_UPSTREAM_VERSION
           git commit -m "release: ${{ steps.build.outputs.build_version }}"
-          git push origin main
+          git push origin HEAD
 
       - name: Commit and push (sync only, no release)
-        if: steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0' && github.event.inputs.publish != 'true'
+        if: inputs.sync == true && steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0' && inputs.publish == false
         run: |
           git add module
           if git diff --cached --quiet; then
@@ -334,10 +317,10 @@ jobs:
           else
             git commit -m "chore: sync upstream changes (no release published)"
           fi
-          git push origin main
+          git push origin HEAD
 
       - name: Zip module (only module/ contents at zip root)
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
         run: |
           # NOTE: SOURCE_DATE_EPOCH could pin zip timestamps for reproducibility (not enforced here).
           cd module
@@ -347,7 +330,7 @@ jobs:
           cd ..
 
       - name: Check tag absence
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
         run: |
           if git rev-parse "${{ steps.build.outputs.build_version }}" >/dev/null 2>&1; then
             echo "::warning::tag ${{ steps.build.outputs.build_version }} already exists"
@@ -357,8 +340,8 @@ jobs:
           fi
 
       - name: Create Release
-        if: steps.merge.outputs.conflict == 'false' && github.event.inputs.publish == 'true' 
-        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: "${{ steps.build.outputs.build_version }}"
           name: "BRENE Custom AI ${{ steps.build.outputs.build_version }}"
