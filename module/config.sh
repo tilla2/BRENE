@@ -50,4 +50,8 @@ config_disable_child_process_restrictions=1
 config_hide_custom_rom_paths_2=0
 
 config_spoof_device_name=''
+config_spoof_brand=''
+config_spoof_device=''
+config_spoof_manufacturer=''
+config_spoof_model=''
 config_align_fingerprint_tail=1

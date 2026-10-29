@@ -79,11 +79,15 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_selinux_hide) config_selinux_hide="$v" ;;
       config_show_refresh_rate) config_show_refresh_rate="$v" ;;
       config_spoof_cmdline_or_bootconfig) config_spoof_cmdline_or_bootconfig="$v" ;;
+      config_spoof_brand) config_spoof_brand="$v" ;;
       config_spoof_date_properties) config_spoof_date_properties="$v" ;;
+      config_spoof_device) config_spoof_device="$v" ;;
       config_spoof_device_name) config_spoof_device_name="$v" ;;
       config_spoof_fingerprint_properties) config_spoof_fingerprint_properties="$v" ;;
       config_spoof_hosts) config_spoof_hosts="$v" ;;
       config_spoof_libstagefright) config_spoof_libstagefright="$v" ;;
+      config_spoof_manufacturer) config_spoof_manufacturer="$v" ;;
+      config_spoof_model) config_spoof_model="$v" ;;
       config_spoof_os_patch_level_property) config_spoof_os_patch_level_property="$v" ;;
       config_spoof_os_security_patch_level_property) config_spoof_os_security_patch_level_property="$v" ;;
       config_spoof_system_properties) config_spoof_system_properties="$v" ;;
@@ -445,7 +449,43 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
         MAIN_MANUFACTURER=$(getprop ro.product.manufacturer)
         MAIN_MODEL=$(getprop ro.product.model)
         MAIN_NAME=$(getprop ro.product.name)
+        _brene_brand_src="auto"
+        _brene_device_src="auto"
+        _brene_manufacturer_src="auto"
+        _brene_model_src="auto"
         _brene_name_src="auto"
+        case "${config_spoof_brand:-}" in
+        ""|-*|*[!A-Za-z0-9_.-]*) ;;
+        *)
+        MAIN_BRAND="${config_spoof_brand}"
+        if_prop_exits_resetprop_n "ro.product.brand" "${MAIN_BRAND}"
+        _brene_brand_src="override"
+        ;;
+        esac
+        case "${config_spoof_device:-}" in
+        ""|-*|*[!A-Za-z0-9_.-]*) ;;
+        *)
+        MAIN_DEVICE="${config_spoof_device}"
+        if_prop_exits_resetprop_n "ro.product.device" "${MAIN_DEVICE}"
+        _brene_device_src="override"
+        ;;
+        esac
+        case "${config_spoof_manufacturer:-}" in
+        ""|-*|*[!A-Za-z0-9_.-]*) ;;
+        *)
+        MAIN_MANUFACTURER="${config_spoof_manufacturer}"
+        if_prop_exits_resetprop_n "ro.product.manufacturer" "${MAIN_MANUFACTURER}"
+        _brene_manufacturer_src="override"
+        ;;
+        esac
+        case "${config_spoof_model:-}" in
+        ""|-*|*[!A-Za-z0-9_.-]*) ;;
+        *)
+        MAIN_MODEL="${config_spoof_model}"
+        if_prop_exits_resetprop_n "ro.product.model" "${MAIN_MODEL}"
+        _brene_model_src="override"
+        ;;
+        esac
         case "${config_spoof_device_name:-}" in
         ""|-*|*[!A-Za-z0-9_.-]*) ;;
         *)
@@ -467,6 +507,10 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
                 brene_log "########################"
                 brene_log "Build Props Spoofing"
                 brene_log "########################"
+                brene_log "[sync_prop]: brand ${_brene_brand_src} -> ${MAIN_BRAND}"
+                brene_log "[sync_prop]: device ${_brene_device_src} -> ${MAIN_DEVICE}"
+                brene_log "[sync_prop]: manufacturer ${_brene_manufacturer_src} -> ${MAIN_MANUFACTURER}"
+                brene_log "[sync_prop]: model ${_brene_model_src} -> ${MAIN_MODEL}"
                 brene_log "[sync_prop]: device-name ${_brene_name_src} -> ${MAIN_NAME}"
         fi
 
