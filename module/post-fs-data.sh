@@ -1,5 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC2154
+# shellcheck disable=SC2154
 MODDIR=${0%/*}
 KSU_BIN=/data/adb/ksud
 KSU_MODULES_DIR=/data/adb/modules
@@ -8,9 +9,6 @@ PERSISTENT_DIR=/data/adb/brene
 DEST_BIN_DIR=/data/adb/ksu/bin
 mkdir -p "${PERSISTENT_DIR}" "${PERSISTENT_DIR}/fake_files"
 
-# Restore the shared SuSFS binary if another module removed it (upstream 5457b3a).
-# Only when it is missing: never overwrite a working binary, otherwise a newer
-# binary shipped by KernelSU would be silently downgraded on every boot.
 if [ ! -x "${DEST_BIN_DIR}/susfs" ]; then
   if [ -x "${MODDIR}/tools/susfs" ]; then
     cp -pf "${MODDIR}/tools/susfs" "${DEST_BIN_DIR}/susfs" 2>/dev/null || true
@@ -18,8 +16,6 @@ if [ ! -x "${DEST_BIN_DIR}/susfs" ]; then
     cp -pf "${PERSISTENT_DIR}/susfs" "${DEST_BIN_DIR}/susfs" 2>/dev/null || true
   fi
 fi
-# Make sure it is present and runnable before the SUSFS probe below, then
-# re-create the compatibility symlinks customize.sh installs (if wiped).
 if [ -f "${DEST_BIN_DIR}/susfs" ]; then
   chmod 755 "${DEST_BIN_DIR}/susfs" 2>/dev/null || true
   [ -e "${DEST_BIN_DIR}/sus" ] || ln -sf "${DEST_BIN_DIR}/susfs" "${DEST_BIN_DIR}/sus" 2>/dev/null || true
@@ -31,23 +27,18 @@ SUSFS_VARIANT=$(${SUSFS_BIN} show variant 2>/dev/null)
 CUSTOM_ROM_NAMES="lineage|infinity|evolution|crdroid|mistos|axion|pixelos|rising|lunaris|halcyon|havoc|alphadroid|bliss|calyx|derpfest|graphene|lmodroid|lumine|matrixx|clover|yaap|aospa"
 
 # Load utils
+# Load utils
 [[ -e "${MODDIR}/utils.sh" ]] && source "${MODDIR}/utils.sh"
-# Load config (allowlist parser; never source untrusted file)
-# POSIX sh compatible (BusyBox ash, mksh, bash, dash) - KernelSU runs boot
-# scripts in BusyBox ash, so no bashisms here (no [[, no printf -v, no ${v:1:-1}).
 if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
   while IFS='=' read -r k v || [ -n "$k" ]; do
-    # Strip CR (handle CRLF-edited files)
-    k=$(printf '%s' "$k" | tr -d '\r')
-    v=$(printf '%s' "$v" | tr -d '\r')
-    # Strip one pair of surrounding single or double quotes
+    k=$(printf '%s' "$k" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    v=$(printf '%s' "$v" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     case "$v" in
       \'*\'|\"*\")
         v=${v#?}
         v=${v%?}
         ;;
     esac
-    # Allowlist: key must be config_ + [A-Za-z0-9_] only
     case "$k" in
       config_*) ;;
       *) continue ;;
@@ -55,14 +46,6 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     case "$k" in
       *[!A-Za-z0-9_]* ) continue ;;
     esac
-    # shellcheck disable=SC2034 # config_* values are consumed across module scripts
-    # Assign without eval (safe in BusyBox ash, dash, mksh, bash):
-    # a plain quoted 'name="$v"' assignment does no word splitting or
-    # globbing and never re-executes the value, so '$(...)', backticks
-    # and ';' inside $v stay inert. The key is already allowlisted to
-    # config_[A-Za-z0-9_]; dispatch on the name explicitly so that no
-    # dynamic variable name (and no eval) is needed. When adding a new
-    # config_ key, extend this list.
     case "$k" in
       config_brene_logs) config_brene_logs="$v" ;;
       config_custom_uname_kernel_release) config_custom_uname_kernel_release="$v" ;;
@@ -117,94 +100,156 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     esac
   done < "${PERSISTENT_DIR}/config.sh"
 fi
-# Deprecated keys merged into config_spoof_system_properties (OR-migration, never disables).
 if [ "${config_sync_device_props}" = "1" ]; then
   config_spoof_system_properties=1
 fi
 
 mkdir -p "${PERSISTENT_DIR}"
 # Clear logs
+# Clear logs
 true > "${PERSISTENT_DIR}/log.txt"
 true > "${PERSISTENT_DIR}/logs.txt"
-# Boot header (truncate behavior preserved: header is written AFTER truncate)
 _brene_boot_ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"
+_brene_boot_bid="$(cut -c1-8 /proc/sys/kernel/random/boot_id 2>/dev/null)"
+case "${_brene_boot_ts}" in
+  19[0-9][0-9]-*|200[0-9]-*|201[0-9]-*|202[0-3]-*|unknown)
+    [ -n "${_brene_boot_bid}" ] && _brene_boot_ts="${_brene_boot_ts} [${_brene_boot_bid}]" ;;
+esac
 echo "=== BRENE boot ${_brene_boot_ts} ===" >> "${PERSISTENT_DIR}/log.txt" 2>/dev/null || true
 if command -v brene_log >/dev/null 2>&1; then
   brene_log "=== BRENE boot ${_brene_boot_ts} ==="
 else
   echo "=== BRENE boot ${_brene_boot_ts} ===" >> "${PERSISTENT_DIR}/logs.txt" 2>/dev/null || true
 fi
-# Fail-loud (re-assert AFTER truncate above, so the message survives): no exit, boot never blocked
 [[ -x "${SUSFS_BIN}" ]] || echo "[!] susfs missing, hiding DISABLED" >> "${PERSISTENT_DIR}/log.txt" 2>/dev/null || true
 
 ## Important Notes:
+## Important Notes:
+## - The following command can be run at other stages like service.sh, boot-completed.sh etc..,
 ## - The following command can be run at other stages like service.sh, boot-completed.sh etc..,
 ## - This module is just an demo showing how to use ksu_susfs tool to commuicate with kernel
+## - This module is just an demo showing how to use ksu_susfs tool to commuicate with kernel
+##
 ##
 
 #### Spoof the stat of file/directory dynamically, effective only for processes that are marked umounted with uid >= 10000 ####
+#### Spoof the stat of file/directory dynamically, effective only for processes that are marked umounted with uid >= 10000 ####
+## Important Note:
 ## Important Note:
 ##  - It is stronly suggested to use dynamically if the target path will be mounted
+##  - It is stronly suggested to use dynamically if the target path will be mounted
+# cat <<EOF >/dev/null
 # cat <<EOF >/dev/null
 # # First, clone the permission before adding to sus_kstat
+# # First, clone the permission before adding to sus_kstat
+# brene_clone_perm "$MODDIR/hosts" /system/etc/hosts
 # brene_clone_perm "$MODDIR/hosts" /system/etc/hosts
 
 # # Second, before bind mount your file/directory, use 'add_sus_kstat' to add the path #
+# # Second, before bind mount your file/directory, use 'add_sus_kstat' to add the path #
+# ${SUSFS_BIN} add_sus_kstat '/system/etc/hosts'
 # ${SUSFS_BIN} add_sus_kstat '/system/etc/hosts'
 
 # # Now bind mount or overlay your path #
+# # Now bind mount or overlay your path #
+# mount -o bind "$MODDIR/hosts" /system/etc/hosts
 # mount -o bind "$MODDIR/hosts" /system/etc/hosts
 
 # # Finally use 'update_sus_kstat' to update the path again for the changed ino and device number #
+# # Finally use 'update_sus_kstat' to update the path again for the changed ino and device number #
 # # update_sus_kstat updates ino, but blocks and size are remained the same as current stat #
+# # update_sus_kstat updates ino, but blocks and size are remained the same as current stat #
+# ${SUSFS_BIN} update_sus_kstat '/system/etc/hosts'
 # ${SUSFS_BIN} update_sus_kstat '/system/etc/hosts'
 
 # # Or if you want to fully clone the stat value from the original stat, use update_sus_kstat_full_clone instead #
+# # Or if you want to fully clone the stat value from the original stat, use update_sus_kstat_full_clone instead #
 # #${SUSFS_BIN} update_sus_kstat_full_clone '/system/etc/hosts'
+# #${SUSFS_BIN} update_sus_kstat_full_clone '/system/etc/hosts'
+# EOF
 # EOF
 
 #### Spoof the stat of file/directory statically, effective only for processes that are marked umounted with uid >= 10000 ####
+#### Spoof the stat of file/directory statically, effective only for processes that are marked umounted with uid >= 10000 ####
+## Important Note:
 ## Important Note:
 ##  - It is suggested to use statically if you don't need to mount anything but simply change the stat of a target path
+##  - It is suggested to use statically if you don't need to mount anything but simply change the stat of a target path
+# cat <<EOF >/dev/null
 # cat <<EOF >/dev/null
 # Usage: ksu_susfs add_sus_kstat_statically </path/of/file_or_directory> \
+# Usage: ksu_susfs add_sus_kstat_statically </path/of/file_or_directory> \
+#                         <ino> <dev> <nlink> <size> <atime> <atime_nsec> <mtime> <mtime_nsec> <ctime> <ctime_nsec> \
 #                         <ino> <dev> <nlink> <size> <atime> <atime_nsec> <mtime> <mtime_nsec> <ctime> <ctime_nsec> \
 #                         <blocks> <blksize>
+#                         <blocks> <blksize>
 # ${SUSFS_BIN} add_sus_kstat_statically '/system/framework/services.jar' 'default' 'default' 'default' 'default' '1230768000' '0' '1230768000' '0' '1230768000' '0' 'default' 'default'
+# ${SUSFS_BIN} add_sus_kstat_statically '/system/framework/services.jar' 'default' 'default' 'default' 'default' '1230768000' '0' '1230768000' '0' '1230768000' '0' 'default' 'default'
+# EOF
 # EOF
 
 #### Redirect opened target path to user-defined path ####
+#### Redirect opened target path to user-defined path ####
+# Please be reminded the following #
 # Please be reminded the following #
 # 1. Both target_pathname and redirected_pathname must be existed before they can be added to kernel.
+# 1. Both target_pathname and redirected_pathname must be existed before they can be added to kernel.
+# 2. Users have to take care of the selinux permission for both target_pathname and redirected_pathname by themselves first.
 # 2. Users have to take care of the selinux permission for both target_pathname and redirected_pathname by themselves first.
 ## Set the permission of the redirected path first ##
+## Set the permission of the redirected path first ##
+# brene_clone_perm '/data/local/tmp/my_hosts' '/system/etc/hosts'
 # brene_clone_perm '/data/local/tmp/my_hosts' '/system/etc/hosts'
 ## Now add the target path and redirected path with pre-defined uid scheme to kernel ##
+## Now add the target path and redirected path with pre-defined uid scheme to kernel ##
 ## *Run 'ksu_susfs add_open_redirect' for more details of <uid_scheme> ##
+## *Run 'ksu_susfs add_open_redirect' for more details of <uid_scheme> ##
+# ${SUSFS_BIN} add_open_redirect '/system/etc/hosts' '/data/local/tmp/my_hosts' '0'
 # ${SUSFS_BIN} add_open_redirect '/system/etc/hosts' '/data/local/tmp/my_hosts' '0'
 
 
 #### Spoof /proc/cmdline or /proc/bootconfig, effective for all processes ####
+#### Spoof /proc/cmdline or /proc/bootconfig, effective for all processes ####
+# No root process detects it for now, and this spoofing won't help much actually #
 # No root process detects it for now, and this spoofing won't help much actually #
 # /proc/bootconfig #
+# /proc/bootconfig #
+# cat <<EOF >/dev/null
 # cat <<EOF >/dev/null
 # FAKE_BOOTCONFIG=${MODDIR}/fake_bootconfig.txt
+# FAKE_BOOTCONFIG=${MODDIR}/fake_bootconfig.txt
+# cat /proc/bootconfig > ./fake_bootconfig.txt
 # cat /proc/bootconfig > ./fake_bootconfig.txt
 # sed -i 's/^androidboot.bootreason.*$/androidboot.bootreason = "reboot"/g' ${FAKE_BOOTCONFIG}
+# sed -i 's/^androidboot.bootreason.*$/androidboot.bootreason = "reboot"/g' ${FAKE_BOOTCONFIG}
+# sed -i 's/^androidboot.vbmeta.device_state.*$/androidboot.vbmeta.device_state = "locked"/g' ${FAKE_BOOTCONFIG}
 # sed -i 's/^androidboot.vbmeta.device_state.*$/androidboot.vbmeta.device_state = "locked"/g' ${FAKE_BOOTCONFIG}
 # sed -i 's/^androidboot.verifiedbootstate.*$/androidboot.verifiedbootstate = "green"/g' ${FAKE_BOOTCONFIG}
+# sed -i 's/^androidboot.verifiedbootstate.*$/androidboot.verifiedbootstate = "green"/g' ${FAKE_BOOTCONFIG}
+# sed -i '/androidboot.verifiedbooterror/d' ${FAKE_BOOTCONFIG}
 # sed -i '/androidboot.verifiedbooterror/d' ${FAKE_BOOTCONFIG}
 # sed -i '/androidboot.verifyerrorpart/d' ${FAKE_BOOTCONFIG}
+# sed -i '/androidboot.verifyerrorpart/d' ${FAKE_BOOTCONFIG}
 # ${SUSFS_BIN} set_cmdline_or_bootconfig ${FAKE_BOOTCONFIG}
+# ${SUSFS_BIN} set_cmdline_or_bootconfig ${FAKE_BOOTCONFIG}
+# EOF
 # EOF
 
 # /proc/cmdline #
+# /proc/cmdline #
+# cat <<EOF >/dev/null
 # cat <<EOF >/dev/null
 # FAKE_PROC_CMDLINE_FILE=${MODDIR}/fake_proc_cmdline.txt
+# FAKE_PROC_CMDLINE_FILE=${MODDIR}/fake_proc_cmdline.txt
+# cat /proc/cmdline > ${FAKE_PROC_CMDLINE_FILE}
 # cat /proc/cmdline > ${FAKE_PROC_CMDLINE_FILE}
 # sed -i 's/androidboot.verifiedbootstate=orange/androidboot.verifiedbootstate=green/g' ${FAKE_PROC_CMDLINE_FILE}
+# sed -i 's/androidboot.verifiedbootstate=orange/androidboot.verifiedbootstate=green/g' ${FAKE_PROC_CMDLINE_FILE}
+# sed -i 's/androidboot.vbmeta.device_state=unlocked/androidboot.vbmeta.device_state=locked/g' ${FAKE_PROC_CMDLINE_FILE}
 # sed -i 's/androidboot.vbmeta.device_state=unlocked/androidboot.vbmeta.device_state=locked/g' ${FAKE_PROC_CMDLINE_FILE}
 # ${SUSFS_BIN} set_cmdline_or_bootconfig ${FAKE_PROC_CMDLINE_FILE}
+# ${SUSFS_BIN} set_cmdline_or_bootconfig ${FAKE_PROC_CMDLINE_FILE}
+# EOF
 # EOF
 
 if [[ "${config_spoof_cmdline_or_bootconfig}" == "1" ]]; then
@@ -237,26 +282,30 @@ if [[ "${config_spoof_cmdline_or_bootconfig}" == "1" ]]; then
 fi
 
 #### Enable avc log spoofing to bypass 'su' domain detection via /proc/<pid> enumeration, effective for all processes ####
+#### Enable avc log spoofing to bypass 'su' domain detection via /proc/<pid> enumeration, effective for all processes ####
 ## disable it when users want to do some debugging with the permission issue or selinux issue ##
+## disable it when users want to do some debugging with the permission issue or selinux issue ##
+#ksu_susfs enable_avc_log_spoofing 0
 #ksu_susfs enable_avc_log_spoofing 0
 if [[ "${config_enable_avc_log_spoofing}" == "1" ]]; then
 	${SUSFS_BIN} enable_avc_log_spoofing 1 2>/dev/null || true
 fi
 
 #### Hide all sus mounts for NON-SU processes in this stage just to prevent zygote from caching them in memory ####
+#### Hide all sus mounts for NON-SU processes in this stage just to prevent zygote from caching them in memory ####
 ## This should be mainly applied if you have ReZygisk enabled but without TreatWheel module ##
+## This should be mainly applied if you have ReZygisk enabled but without TreatWheel module ##
+## Or it is up to you to keep it enabled since su process can still see the mounts ##
 ## Or it is up to you to keep it enabled since su process can still see the mounts ##
 if [[ "${config_hide_sus_mnts_for_non_su_procs}" == "1" ]]; then
 	${SUSFS_BIN} hide_sus_mnts_for_non_su_procs 1 2>/dev/null || true
 fi
 
-# Uname Spoofing
 #### Spoof the uname, effective for all processes ####
-# You can get your uname args by running 'uname {-r|-v}' on your stock ROM.
-# pass 'default' to tell susfs to use the default value by uname.
+#### Spoof the uname, effective for all processes ####
+# ${SUSFS_BIN} set_uname 'default' 'default'
 # ${SUSFS_BIN} set_uname 'default' 'default'
 
-# Custom Uname has priority over Automatic Uname.
 if [[ "${config_custom_spoof_uname}" == "1" ]]; then
 
 if [[ "${config_brene_logs}" == "1" ]]; then
@@ -269,8 +318,6 @@ if [[ "${config_brene_logs}" == "1" ]]; then
         final_uname_release="${config_custom_uname_kernel_release}"
         final_uname_version="${config_custom_uname_kernel_version}"
 
-        # Shell-side allowlist (config.sh is sourced; hand edits must not become code exec).
-        # Release: default or [A-Za-z0-9._+~-] ; Version: default or [A-Za-z0-9 #(),.:+_~@-]
         case "${final_uname_release}" in
                 default) ;;
                 *[!A-Za-z0-9._+~-]*|"") final_uname_release="default" ;;
@@ -280,7 +327,6 @@ if [[ "${config_brene_logs}" == "1" ]]; then
                 *[!A-Za-z0-9\ \#\(\),.:+_~@-]*|"") final_uname_version="default" ;;
         esac
 
-        # Preserve BRENE's custom 'default' fallback behavior.
         if [[ "${final_uname_release}" == "default" || "${final_uname_version}" == "default" ]]; then
                 auto_kernel_version=$(cat /proc/version | awk '{print $3}' | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
                 auto_uname_version="#1 SMP PREEMPT $(resetprop ro.build.date | tr -s ' ')"
@@ -328,6 +374,7 @@ elif [[ "${config_spoof_uname}" == "1" ]]; then
 fi
 
 ## Disable susfs kernel log ##
+## Disable susfs kernel log ##
 if [[ "${config_enable_log}" == "1" ]]; then
 	${SUSFS_BIN} enable_log 1 2>/dev/null || true
 elif [[ "${config_enable_log}" == "0" ]]; then
@@ -335,11 +382,13 @@ elif [[ "${config_enable_log}" == "0" ]]; then
 fi
 
 # Hide /system/addon.d Path
+# Hide /system/addon.d Path
 if [[ "${config_hide_addon_d}" == "1" ]]; then
 	brene_sus_map "/system/addon.d" || true
     brene_sus_path_loop "/system/addon.d" || true
 fi
 
+# Hide Custom ROM Paths
 # Hide Custom ROM Paths
 if [[ "${config_hide_custom_rom_paths}" == "1" ]]; then
 	for i in ${CUSTOM_ROM_NAMES//|/ }; do
@@ -356,6 +405,7 @@ if [[ "${config_hide_custom_rom_paths}" == "1" ]]; then
 fi
 
 # Hide Custom ROM Paths (Extreme)
+# Hide Custom ROM Paths (Extreme)
 if [[ "${config_hide_custom_rom_paths_2}" == "1" ]]; then
         for i in ${CUSTOM_ROM_NAMES//|/ }; do
                 brene_find /data/misc /data/dalvik-cache /data/resource-cache -iname "*${i}*" -print0 | while IFS= read -r -d '' path; do
@@ -365,11 +415,6 @@ if [[ "${config_hide_custom_rom_paths_2}" == "1" ]]; then
         done
 fi
 
-#### Fully sync all build-related props (fingerprint + sub-fields) across all partitions ####
-## Fully device-agnostic + fail-safe: never blocks boot even if resetprop errors ##
-## Skipped during hot install (live session) — live resetprop of build fingerprint fields
-## is unsafe while zygote/system_server are already running; it will apply normally on
-## the next real reboot instead. ##
 BRENE_UPTIME_SEC=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)
 case "$BRENE_UPTIME_SEC" in ''|*[!0-9]*) BRENE_UPTIME_SEC=999;; esac
 if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 120 ]]; then
@@ -400,20 +445,16 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
         MAIN_MANUFACTURER=$(getprop ro.product.manufacturer)
         MAIN_MODEL=$(getprop ro.product.model)
         MAIN_NAME=$(getprop ro.product.name)
-        # TEE-keybox SKU override: config_spoof_device_name is not a native prop, so
-        # it cannot be synced FROM ro.product.name - when set, it IS the name source
-        # for the whole sync (every partition plus the main prop). Empty/invalid = automation.
+        _brene_name_src="auto"
         case "${config_spoof_device_name:-}" in
         ""|-*|*[!A-Za-z0-9_.-]*) ;;
         *)
         MAIN_NAME="${config_spoof_device_name}"
         if_prop_exits_resetprop_n "ro.product.name" "${MAIN_NAME}"
-        [ "${config_brene_logs}" = "1" ] && brene_log "[sync_prop]: device-name override -> ${MAIN_NAME} (all partitions)"
+        _brene_name_src="override"
         ;;
         esac
 
-        # Base fields owned by Spoof System Properties; fingerprint/date/date.utc
-        # are owned by their own toggles (full control per button).
         FIELDS="id version.release version.sdk version.incremental version.release_or_codename version.sdk_full tags type"
         if [[ "${config_spoof_fingerprint_properties}" == "1" ]]; then FIELDS="fingerprint ${FIELDS}"; fi
         if [[ "${config_spoof_date_properties}" == "1" ]]; then FIELDS="${FIELDS} date"; fi
@@ -426,6 +467,7 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
                 brene_log "########################"
                 brene_log "Build Props Spoofing"
                 brene_log "########################"
+                brene_log "[sync_prop]: device-name ${_brene_name_src} -> ${MAIN_NAME}"
         fi
 
         if [[ -n "${MAIN_FP}" ]]; then
@@ -494,10 +536,6 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
                     fi
                 done
             done
-            # Fallback: dynamic discovery empty (or only build/bootimage) — cover
-            # upstream static 10-prop fingerprint list. No duplicate writes: only
-            # when no partition part matched above.
-            # NOTE: granular fingerprint/utc/date toggles are applied at tail.
             if [[ "${_brene_sync_matched}" == "0" && "${config_spoof_fingerprint_properties}" == "1" ]]; then
                 brene_spoof_fingerprint_props
             fi
@@ -505,14 +543,6 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
     fi
 fi
 
-# Load custom_sus_kstat.txt
-# Format per line (see brene_kstat_add_line in utils.sh):
-#   bare `/absolute/path`            : normal -> add_sus_kstat <path>
-#   bare `fullclone:/absolute/path`  : full_clone -> add_sus_kstat <path>
-#   13 fields (TAB-separated):       : static -> add_sus_kstat_statically <path> <12 values>
-#     <path> <ino> <dev> <nlink> <size> <atime> <atime_nsec> <mtime> <mtime_nsec> <ctime> <ctime_nsec> <blocks> <blksize>
-# Use the literal word 'default' for any static field to leave it as the real current value.
-# Every outcome is logged as [custom_sus_kstat:<mode>]: OK / FAILED rc=N :: err / SKIPPED (reason).
 if [[ -e "${PERSISTENT_DIR}/custom_sus_kstat.txt" ]]; then
         if [[ "${config_brene_logs}" == "1" ]]; then
                         brene_log ""
@@ -525,13 +555,6 @@ if [[ -e "${PERSISTENT_DIR}/custom_sus_kstat.txt" ]]; then
         done < "${PERSISTENT_DIR}/custom_sus_kstat.txt"
 fi
 
-# Load custom_open_redirect.txt
-# Format per line (TAB-separated): <src><TAB><dst><TAB><uid_scheme>
-# Example: /system/etc/hosts<TAB>/data/adb/brene/fake_files/hosts<TAB>3
-# uid_scheme: 0 non-app (uid<10000), 1 non-su uid 0, 2 non-su,
-#             3 umounted uid>=10000 (default), 4 umounted
-# NOTE: dst is NOT auto-created and SELinux is NOT auto-fixed here;
-# both paths must already exist (see brene_open_redirect in utils.sh).
 if [[ -e "${PERSISTENT_DIR}/custom_open_redirect.txt" ]]; then
         if [[ "${config_brene_logs}" == "1" ]]; then
                         brene_log ""
@@ -541,7 +564,6 @@ if [[ -e "${PERSISTENT_DIR}/custom_open_redirect.txt" ]]; then
         fi
         set -f
         while IFS= read -r i || [[ -n "${i}" ]]; do
-                # Strip CR (unquoted $'\r': quoting it would strip literal $'\r' chars)
                 i=${i%$'\r'}
                 trimmed="$(printf '%s' "${i}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
                 [[ -z "${trimmed}" || "${trimmed}" == "#"* ]] && continue
@@ -552,7 +574,6 @@ if [[ -e "${PERSISTENT_DIR}/custom_open_redirect.txt" ]]; then
                 IFS="${OLDIFS}"
 
                 if [[ "$#" -eq 3 ]]; then
-                        # brene_open_redirect logs FAILED itself; log success here like the kstat loader.
                         if brene_open_redirect "$1" "$2" "$3"; then
                                 [[ "${config_brene_logs}" == "1" ]] && brene_log "[custom_open_redirect]: ${i}"
                         fi
@@ -565,8 +586,7 @@ if [[ -e "${PERSISTENT_DIR}/custom_open_redirect.txt" ]]; then
 fi
 
 # Spoof /system/etc/hosts
-# Serve a stock-looking hosts file through open_redirect (instead of only
-# faking its stat), then report the faked stat with size 56 like upstream.
+# Spoof /system/etc/hosts
 if [[ "${config_spoof_hosts}" == "1" ]]; then
     path=/system/etc/hosts
     safe="$(printf '%s' "${path}" | tr '/' '_')"
@@ -584,31 +604,36 @@ if [[ "${config_spoof_hosts}" == "1" ]]; then
     ${SUSFS_BIN} add_sus_kstat_statically "${path}" '100' 'default' 'default' '56' 'default' 'default' 'default' 'default' 'default' 'default' '1' '4096' 2>/dev/null || true
 fi
 
-# Spoof Android System Properties
 if [[ "${config_spoof_system_properties}" == "1" ]]; then
    brene_spoof_system_properties || true
 fi
+# Spoof Fingerprint Properties
 # Spoof Fingerprint Properties
 if [[ "${config_spoof_fingerprint_properties}" == "1" ]]; then
    brene_spoof_fingerprint_props || true
 fi
 # Spoof UTC Properties
+# Spoof UTC Properties
 if [[ "${config_spoof_utc_properties}" == "1" ]]; then
    brene_spoof_utc_props || true
 fi
+# Spoof Date Properties
 # Spoof Date Properties
 if [[ "${config_spoof_date_properties}" == "1" ]]; then
    brene_spoof_date_props || true
 fi
 # Spoof OS Security Patch Level Property
+# Spoof OS Security Patch Level Property
 if [[ "${config_spoof_os_security_patch_level_property}" == "1" ]]; then
    brene_spoof_os_security_patch_props || true
 fi
+# Spoof Vendor Security Patch Level Property
 # Spoof Vendor Security Patch Level Property
 if [[ "${config_spoof_vendor_security_patch_level_property}" == "1" ]]; then
    brene_spoof_vendor_security_patch_props || true
 fi
 
+# Hide Suspicious PTYs
 # Hide Suspicious PTYs
 if [[ "${config_hide_suspicious_pty}" == "1" ]]; then
 	if [[ "${config_brene_logs}" == "1" ]]; then

@@ -8,9 +8,6 @@ SUSFS_BIN=/data/adb/ksu/bin/susfs
 PERSISTENT_DIR=/data/adb/brene
 DEST_BIN_DIR=/data/adb/ksu/bin
 
-# Atomic + sanitized logger for logs.txt (POSIX sh compatible, no bashisms).
-# Sanitizes newline/CR -> space and C0 controls/DEL -> '?' (UTF-8 bytes kept),
-# then appends atomically with flock when available.
 brene_log() {
     local _brene_log_msg _brene_log_file
     [ -z "${PERSISTENT_DIR:-}" ] && return 0
@@ -27,10 +24,6 @@ brene_log() {
     return 0
 }
 
-# brene_find <find args...>: timeout-bounded find for boot-time scans.
-# Same traversal/match semantics as plain find, but a stuck or gigantic
-# partition can delay boot by at most BRENE_FIND_TIMEOUT_SEC, never stall it.
-# Always exits 0 (fail-safe); stderr suppressed, matches on stdout.
 BRENE_FIND_TIMEOUT_SEC=120
 brene_find() {
     if command -v timeout >/dev/null 2>&1; then
@@ -41,16 +34,8 @@ brene_find() {
     return 0
 }
 
-# __brene_clean_hide_path <raw-line>: canonicalize one custom_*.txt line.
-# Prints the cleaned absolute path on stdout.
-#   rc=0 : valid path, exists           -> caller should hide it
-#   rc=3 : valid path, missing (warned) -> caller may still attempt it
-#   rc=2 : empty/comment                -> silent skip
-#   rc=1 : flag / non-absolute (warned) -> must skip (option-injection risk)
 __brene_clean_hide_path() {
     local _raw="$1" _p
-    # Strip ONE trailing CR (CRLF-edited files). NOTE: $'\r' must NOT be
-    # quoted -- "...$'\r'..." would strip the literal 4 chars $'\r' instead.
     _p=${_raw%$'\r'}
     _p="$(printf '%s' "${_p}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
     [ -z "${_p}" ] && return 2
@@ -73,11 +58,6 @@ __brene_clean_hide_path() {
     return 0
 }
 
-# brene_load_hide_list <file> <handler-fn>: load one custom_*.txt list.
-# Every line is validated by __brene_clean_hide_path (absolute path, no
-# flags, empty/comment skipped, missing warned); the handler (one of
-# brene_sus_map / brene_sus_path / brene_sus_path_loop / brene_sus_mount /
-# brene_kernel_umount) runs fail-safe so one bad line never stops the rest.
 brene_load_hide_list() {
     local _file="$1" _handler="$2" _line _cleaned _rc
     [ -e "${_file}" ] || return 0
@@ -146,9 +126,6 @@ brene_spoof_system_properties() {
 	resetprop_n "init.svc_debug_pid.adbd" ""
 	resetprop_n "persist.sys.usb.config" "mtp"
 	resetprop_n "ro.adb.secure" "1"
-	# ro.crypto.state is set in boot-completed.sh, after vold settles:
-	# setting it this early keeps the encrypted transition from reaching
-	# vendor init triggers.
 	resetprop_n "ro.debuggable" "0"
 	resetprop_n "ro.force.debuggable" "0"
 	if_prop_exits_resetprop_n "ro.secureboot.devicelock" "1"
@@ -182,7 +159,6 @@ brene_spoof_system_properties() {
 	if_prop_exits_resetprop_n "ro.boot.warranty_bit" "0"
 	if_prop_exits_resetprop_n "ro.oem_unlock_supported" "0"
 
-	# NOTE: fingerprint/utc/date are separate toggles (brene_spoof_fingerprint_props / brene_spoof_utc_props / brene_spoof_date_props).
 
 	## Delete some prop names for newer pixel device ##
 	resetprop -d "ro.boot.verifiedbooterror"
@@ -204,9 +180,6 @@ brene_spoof_system_properties() {
 	resetprop -c --force
 }
 
-# Fingerprint subset fallback (mirrors upstream spoof_fingerprint_properties dcbf30f).
-# Owned by config_spoof_fingerprint_properties toggle.
-# Same 10-prop list + same 4-string sanitize (userdebug->user, strip evolution/crdroid/lineage).
 brene_spoof_fingerprint_props() {
 	local fingerprint_value new_fingerprint_value
 	fingerprint_value=$(resetprop ro.build.fingerprint)
@@ -260,30 +233,54 @@ brene_spoof_date_props() {
 	if_prop_exits_resetprop_n "ro.vendor_dlkm.build.date" "${new_date_value}"
 }
 
-# brene_align_fingerprint_tail : derive Build sub-fields from the LIVE fingerprint.
-# Fills ro.build.id / ro.build.version.incremental / ro.build.flavor from whatever
-# ro.build.fingerprint currently is (e.g. PIF's), so those fields stop contradicting
-# the spoofed fingerprint. Never touches the fingerprint itself, and never writes any
-# TEE-attested identity field (brand/device/product/model/serial stay untouched).
+_brene_fp_tail_open() {
+    [ "${config_brene_logs}" = "1" ] || return 1
+    [ "${_BRENE_FP_TAIL_N}" -gt 0 ] && return 0
+    if [ -n "${_BRENE_FP_TAIL_HDR}" ]; then
+        brene_log ""
+        brene_log "########################"
+        brene_log "${_BRENE_FP_TAIL_HDR}"
+        brene_log "########################"
+    fi
+    brene_log "[fingerprint_tail]: ro.build.fingerprint: ${_BRENE_FP_TAIL_FP}"
+    _BRENE_FP_TAIL_N=1
+    return 0
+}
 brene_align_fingerprint_tail() {
-    local fp seg rest id incr type prod
-    fp=$(resetprop ro.build.fingerprint)
-    [ -n "${fp}" ] || return 0
-    seg=${fp#*:}
+    local seg rest id incr type prod cur
+    _BRENE_FP_TAIL_HDR="$1"
+    _BRENE_FP_TAIL_N=0
+    _BRENE_FP_TAIL_FP=$(resetprop ro.build.fingerprint)
+    [ -n "${_BRENE_FP_TAIL_FP}" ] || return 0
+    seg=${_BRENE_FP_TAIL_FP#*:}
     rest=${seg#*/}
     id=${rest%%/*}
     rest=${rest#*/}
     incr=${rest%%:*}
     type=${rest#*:}; type=${type%%/*}
-    prod=${fp%%:*}; prod=${prod##*/}
+    prod=${_BRENE_FP_TAIL_FP%%:*}; prod=${prod##*/}
     [ "${id}" = "${incr}" ] && incr=""
     case "${id}" in ""|*[!A-Za-z0-9._-]*) id="" ;; esac
     case "${incr}" in ""|*[!A-Za-z0-9._-]*) incr="" ;; esac
     case "${type}" in user|userdebug|eng) ;; *) type="" ;; esac
-    [ -n "${id}" ] && [ -n "${prod}" ] && if_prop_exits_resetprop_n "ro.build.id" "${id}"
-    [ -n "${incr}" ] && if_prop_exits_resetprop_n "ro.build.version.incremental" "${incr}"
-    [ -n "${type}" ] && [ -n "${prod}" ] && if_prop_exits_resetprop_n "ro.build.flavor" "${prod}-${type}"
-    [ "${config_brene_logs}" = "1" ] && brene_log "[fingerprint_tail]: id=${id} incremental=${incr} flavor=${prod}-${type}"
+    if [ -n "${id}" ] && [ -n "${prod}" ]; then
+        cur=$(resetprop ro.build.id 2>/dev/null)
+        if [ -n "${cur}" ] && [ "${cur}" != "${id}" ] && resetprop -n ro.build.id "${id}" 2>/dev/null; then
+            _brene_fp_tail_open && brene_log "[fingerprint_tail]: ro.build.id: ${cur} -> ${id}"
+        fi
+    fi
+    if [ -n "${incr}" ]; then
+        cur=$(resetprop ro.build.version.incremental 2>/dev/null)
+        if [ -n "${cur}" ] && [ "${cur}" != "${incr}" ] && resetprop -n ro.build.version.incremental "${incr}" 2>/dev/null; then
+            _brene_fp_tail_open && brene_log "[fingerprint_tail]: ro.build.version.incremental: ${cur} -> ${incr}"
+        fi
+    fi
+    if [ -n "${type}" ] && [ -n "${prod}" ]; then
+        cur=$(resetprop ro.build.flavor 2>/dev/null)
+        if [ -n "${cur}" ] && [ "${cur}" != "${prod}-${type}" ] && resetprop -n ro.build.flavor "${prod}-${type}" 2>/dev/null; then
+            _brene_fp_tail_open && brene_log "[fingerprint_tail]: ro.build.flavor: ${cur} -> ${prod}-${type}"
+        fi
+    fi
     return 0
 }
 brene_spoof_os_security_patch_props() {
@@ -294,12 +291,9 @@ brene_spoof_os_security_patch_props() {
         patch_year=$(date +%Y); patch_month=$(date +%m); patch_day=$(date +%d)
     fi
     [ -n "${patch_year}" ] && [ -n "${patch_month}" ] && [ -n "${patch_day}" ] || return 0
-    # Strip one leading zero (POSIX; $((10#..)) is rejected by ash/dash)
     patch_month_num=${patch_month#0}; patch_day=${patch_day#0}
     [ -z "${patch_month_num}" ] && patch_month_num=0
     [ -z "${patch_day}" ] && patch_day=0
-    # Unsynced-clock guard: post-fs-data may run before RTC/NTP sync; a 1970-*
-    # SPL gets cached by zygote for the whole boot. Skip until the clock is sane.
     [ "${patch_year}" -ge 2024 ] 2>/dev/null || return 0
     if [ "${patch_day}" -ge 5 ]; then
 
@@ -321,12 +315,9 @@ brene_spoof_vendor_security_patch_props() {
         patch_year=$(date +%Y); patch_month=$(date +%m); patch_day=$(date +%d)
     fi
     [ -n "${patch_year}" ] && [ -n "${patch_month}" ] && [ -n "${patch_day}" ] || return 0
-    # Strip one leading zero (POSIX; $((10#..)) is rejected by ash/dash)
     patch_month_num=${patch_month#0}; patch_day=${patch_day#0}
     [ -z "${patch_month_num}" ] && patch_month_num=0
     [ -z "${patch_day}" ] && patch_day=0
-    # Unsynced-clock guard: post-fs-data may run before RTC/NTP sync; a 1970-*
-    # SPL gets cached by zygote for the whole boot. Skip until the clock is sane.
     [ "${patch_year}" -ge 2024 ] 2>/dev/null || return 0
     if [ "${patch_day}" -ge 5 ]; then
 
@@ -366,9 +357,6 @@ brene_sus_map() {
 	fi
 	return "${_rc}"
 }
-# add_open_redirect <src> <dst> <uid_scheme>: both must already exist.
-# Only absolute paths are accepted (never flags). No auto SELinux fix:
-# fix the redirected path context yourself, e.g. brene_clone_perm "$DST" "$SRC".
 brene_open_redirect() {
 	local SRC=$1
 	local DST=$2
@@ -421,9 +409,6 @@ brene_set_uname() {
 }
 brene_kernel_umount() {
 	local TARGET=$1
-	# Fail-safe: option-injection + boot-never-blocked. Absolute existing
-	# paths only; every external call guarded so a missing binary or a
-	# kernel rejection can never abort the boot stage.
 	case "${TARGET}" in
 		/*) ;;
 		*) [ "${config_brene_logs}" = "1" ] && brene_log "[kernel_umount] SKIPPED (not absolute path): ${TARGET}"; return 1 ;;
@@ -435,7 +420,6 @@ brene_kernel_umount() {
 	return 0
 }
 
-# Backward compatibility for existing custom_sus_mount.txt users.
 brene_sus_mount() {
 	brene_kernel_umount "$1"
 }
@@ -448,8 +432,6 @@ brene_sus_kstat_static() {
 	[ -z "${STAT_OUT}" ] && return
 	set -f
 	set -- ${STAT_OUT}
-	# Restore globbing BEFORE any early return: leaking `set -f` (noglob)
-	# into the caller would silently break every later unquoted expansion.
 	if [[ $# -ne 6 ]]; then set +f; return 1; fi
 	set +f
 	INO=$1; DEV=$2; NLINK=$3; SIZE=$4; BLOCKS=$5; BLKSIZE=$6
@@ -462,14 +444,10 @@ brene_sus_kstat_static() {
 	return "${_kstat_rc}"
 }
 
-# Log one kstat line (only when brene logs are enabled).
 __brene_kstat_log() {
 	[[ "${config_brene_logs}" == "1" ]] && brene_log "$1"
 }
 
-# Run one susfs kstat command, capturing the REAL exit status (never
-# `if var="$(...)"`, whose status is always 0). Logs OK/FAILED uniformly.
-# Usage: __brene_kstat_run <log-tag> <susfs-cmd> [args...]
 __brene_kstat_run() {
 	local _tag="$1"; shift
 	local _err _rc
@@ -482,7 +460,6 @@ __brene_kstat_run() {
 	return "${_rc}"
 }
 
-# Validate one static kstat value: 'default'/empty or decimal digits.
 __brene_kstat_valid_val() {
 	case "$1" in
 		""|default) return 0 ;;
@@ -491,18 +468,8 @@ __brene_kstat_valid_val() {
 	esac
 }
 
-# brene_kstat_add_line <raw-line>
-# Parse one custom_sus_kstat.txt line and issue the matching susfs add command:
-#   bare /path            -> add_sus_kstat (normal, boot-time snapshot)
-#   fullclone:/path       -> add_sus_kstat (full-clone snapshot)
-#   13 TAB fields         -> add_sus_kstat_statically (explicit values)
-#   13 space fields       -> same (legacy hand-edited lines)
-# Safe to call live from a root shell (e.g. via su -c) as well as from boot.
-# Returns 0 on add success, 1 on failure/skip (2 = empty/comment, silent).
 brene_kstat_add_line() {
 	local _raw="$1" _line _trim _n _p _had_glob=0 _oldifs
-	# Strip ONE trailing CR (CRLF-edited files). NOTE: $'\r' must NOT be
-	# quoted -- "...$'\r'..." would strip the literal 4 chars $'\r' instead.
 	_line=${_raw%$'\r'}
 	_trim="$(printf '%s' "${_line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 	[[ -z "${_trim}" || "${_trim}" == "#"* ]] && return 2
@@ -524,7 +491,6 @@ brene_kstat_add_line() {
 				__brene_kstat_run "fullclone" add_sus_kstat "${_p}"
 				return $? ;;
 			/*)
-				# Legacy fallback: space-separated static line (13 ws fields).
 				set -f; set -- $1
 				if [[ "$#" -eq 13 ]]; then
 					[[ "${_had_glob}" -eq 0 ]] && set +f
@@ -553,12 +519,6 @@ brene_kstat_add_line() {
 	fi
 }
 
-# __brene_kstat_add_static <note> <rawline> <path> <12 values...>
-# (internal: validates values, checks existence, runs add_sus_kstat_statically)
-# NOTE: no bash arrays here -- the installer parses every *.sh with plain sh,
-# where `arr+=(x)` is a hard syntax error (while [[ ]] merely parses as a
-# command name). Values are validated to digits/'default' so plain
-# word-splitting below is safe.
 __brene_kstat_add_static() {
 	local _note="$1" _raw="$2" _p="$3"
 	shift 3
@@ -575,7 +535,6 @@ __brene_kstat_add_static() {
 		__brene_kstat_log "[custom_sus_kstat] SKIPPED (not found): ${_raw}"
 		return 1
 	fi
-	# shellcheck disable=SC2086
 	if __brene_kstat_run "static" add_sus_kstat_statically "${_p}" ${_list}; then
 		[[ -n "${_note}" ]] && __brene_kstat_log "[custom_sus_kstat:static] note ${_note}: ${_raw}"
 		return 0
@@ -583,13 +542,6 @@ __brene_kstat_add_static() {
 	return 1
 }
 
-# brene_kstat_update_line <raw-line>
-# Late-stage refresh for one custom_sus_kstat.txt line (called from service.sh):
-#   normal / bare path      -> update_sus_kstat
-#   fullclone:/path         -> update_sus_kstat_full_clone
-#   static (13 fields)      -> update_sus_kstat (completes the static add
-#                              after mounts are up, per susfs docs)
-# Returns 0 on update success, 1 on failure/skip (2 = empty/comment, silent).
 brene_kstat_update_line() {
 	local _raw="$1" _line _trim _n _p _had_glob=0 _oldifs
 	_line=${_raw%$'\r'}

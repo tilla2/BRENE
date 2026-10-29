@@ -1,5 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC2154
+# shellcheck disable=SC2154
 MODDIR=${0%/*}
 KSU_BIN=/data/adb/ksud
 KSU_MODULES_DIR=/data/adb/modules
@@ -10,23 +11,29 @@ DEST_BIN_DIR=/data/adb/ksu/bin
 CUSTOM_ROM_NAMES="lineage|infinity|evolution|crdroid|mistos|axion|pixelos|rising|lunaris|halcyon|havoc|alphadroid|bliss|calyx|derpfest|graphene|lmodroid|lumine|matrixx|clover|yaap|aospa"
 
 # Load utils
+# Load utils
 [[ -e "${MODDIR}/utils.sh" ]] && source "${MODDIR}/utils.sh"
-# Load config (allowlist parser; never source untrusted file)
-# POSIX sh compatible (BusyBox ash, mksh, bash, dash) - KernelSU runs boot
-# scripts in BusyBox ash, so no bashisms here (no [[, no printf -v, no ${v:1:-1}).
+_brene_boot_bid="$(cut -c1-8 /proc/sys/kernel/random/boot_id 2>/dev/null)"
+if [ -n "${_brene_boot_bid}" ]; then
+  _brene_boot_ts="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+  case "${_brene_boot_ts}" in
+    19[0-9][0-9]-*|200[0-9]-*|201[0-9]-*|202[0-3]-*|unknown) _brene_boot_ts="" ;;
+  esac
+  if [ -n "${_brene_boot_ts}" ]; then
+    sed -i -E "s/^=== BRENE boot .* \\[${_brene_boot_bid}\\] ===$/=== BRENE boot ${_brene_boot_ts} ===/" "${PERSISTENT_DIR}/logs.txt" "${PERSISTENT_DIR}/log.txt" 2>/dev/null
+  fi
+fi
+unset _brene_boot_bid _brene_boot_ts
 if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
   while IFS='=' read -r k v || [ -n "$k" ]; do
-    # Strip CR (handle CRLF-edited files)
-    k=$(printf '%s' "$k" | tr -d '\r')
-    v=$(printf '%s' "$v" | tr -d '\r')
-    # Strip one pair of surrounding single or double quotes
+    k=$(printf '%s' "$k" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    v=$(printf '%s' "$v" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     case "$v" in
       \'*\'|\"*\")
         v=${v#?}
         v=${v%?}
         ;;
     esac
-    # Allowlist: key must be config_ + [A-Za-z0-9_] only
     case "$k" in
       config_*) ;;
       *) continue ;;
@@ -34,14 +41,6 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     case "$k" in
       *[!A-Za-z0-9_]* ) continue ;;
     esac
-    # shellcheck disable=SC2034 # config_* values are consumed across module scripts
-    # Assign without eval (safe in BusyBox ash, dash, mksh, bash):
-    # a plain quoted 'name="$v"' assignment does no word splitting or
-    # globbing and never re-executes the value, so '$(...)', backticks
-    # and ';' inside $v stay inert. The key is already allowlisted to
-    # config_[A-Za-z0-9_]; dispatch on the name explicitly so that no
-    # dynamic variable name (and no eval) is needed. When adding a new
-    # config_ key, extend this list.
     case "$k" in
       config_align_fingerprint_tail) config_align_fingerprint_tail="$v" ;;
       config_brene_logs) config_brene_logs="$v" ;;
@@ -97,14 +96,12 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     esac
   done < "${PERSISTENT_DIR}/config.sh"
 fi
-# Deprecated keys merged into config_spoof_system_properties (OR-migration, never disables).
 if [ "${config_sync_device_props}" = "1" ]; then
   config_spoof_system_properties=1
 fi
 
 # Update Description
-# Fail-loud like customize.sh: only v2* counts as healthy; missing/mismatch -> honest ❌ (no exit, boot never blocked)
-# Both branches carry the same detail level (kernel + susfs ver/variant + features); empty probes fall back to missing/unknown.
+# Update Description
 susfs_ver=$(${SUSFS_BIN} show version 2>/dev/null || true)
 susfs_variant=$(${SUSFS_BIN} show variant 2>/dev/null || true)
 susfs_features_number=$(${SUSFS_BIN} show enabled_features 2>/dev/null | wc -l)
@@ -120,7 +117,6 @@ else
 	${KSU_BIN} module config set override.description "[Module Status: ❌ | Kernel: ${kernel_version} | SuSFS Patches: ❌ ${susfs_ver} (${susfs_variant}) | SuSFS Features: ${susfs_features_number}/${susfs_total_features}] ${description}" 2>/dev/null || true
 fi
 
-# SU Compat (fail-safe: ksud absence/rejection never blocks boot)
 if [[ "${config_su_compat}" == "1" ]]; then
 	${KSU_BIN} feature set su_compat 1 2>/dev/null || true
 elif [[ "${config_su_compat}" == "0" ]]; then
@@ -128,12 +124,14 @@ elif [[ "${config_su_compat}" == "0" ]]; then
 fi
 
 # Kernel Umount
+# Kernel Umount
 if [[ "${config_kernel_umount}" == "1" ]]; then
 	${KSU_BIN} feature set kernel_umount 1 2>/dev/null || true
 elif [[ "${config_kernel_umount}" == "0" ]]; then
 	${KSU_BIN} feature set kernel_umount 0 2>/dev/null || true
 fi
 
+# Hide SELinux modification
 # Hide SELinux modification
 if [[ "${config_selinux_hide}" == "1" ]]; then
 	${KSU_BIN} feature set selinux_hide 1 2>/dev/null || true
@@ -144,12 +142,14 @@ fi
 ${KSU_BIN} feature save 2>/dev/null || true
 
 # Developer Options
+# Developer Options
 if [[ "${config_developer_options}" == "1" ]]; then
 	command -v settings >/dev/null 2>&1 && settings put global development_settings_enabled 1
 elif [[ "${config_developer_options}" == "0" ]]; then
 	command -v settings >/dev/null 2>&1 && settings put global development_settings_enabled 0
 fi
 
+# USB Debugging
 # USB Debugging
 if [[ "${config_usb_debugging}" == "1" ]]; then
 	command -v settings >/dev/null 2>&1 && settings put global adb_enabled 1
@@ -158,6 +158,7 @@ elif [[ "${config_usb_debugging}" == "0" ]]; then
 fi
 
 # Wireless Debugging
+# Wireless Debugging
 if [[ "${config_wireless_debugging}" == "1" ]]; then
 	command -v settings >/dev/null 2>&1 && settings put global adb_wifi_enabled 1
 elif [[ "${config_wireless_debugging}" == "0" ]]; then
@@ -165,15 +166,14 @@ elif [[ "${config_wireless_debugging}" == "0" ]]; then
 fi
 
 # Disable Child Process Restrictions
+# Disable Child Process Restrictions
 if [[ "${config_disable_child_process_restrictions}" == "1" ]]; then
-        # No -p (--persistent): upstream e6bcf86 removed it because a persistent
-        # resetprop broke this override on some devices.
         resetprop -n persist.sys.fflag.override.settings_enable_monitor_phantom_procs false 2>/dev/null || true
 fi
 
 # Remove Custom ROM Properties
+# Remove Custom ROM Properties
 if [[ "${config_rom_props}" == "1" ]]; then
-	# Match on prop NAME only (value may legitimately contain e.g. "lineage" in fingerprint)
 	resetprop | awk -F'[][]' '{print $2}' | grep -iE "${CUSTOM_ROM_NAMES}" | grep -E '^[a-zA-Z0-9_.-]+$' | while IFS= read -r prop; do
 		resetprop -d "${prop}"
 	done
@@ -182,6 +182,7 @@ if [[ "${config_rom_props}" == "1" ]]; then
 fi
 
 # Remove Play Integrity Fix Properties
+# Remove Play Integrity Fix Properties
 if [[ "${config_pif_props}" == "1" ]]; then
 	resetprop | grep -iE "pihook|pixelprops|spoof" | awk -F'[][]' '{print $2}' | grep -E '^[a-zA-Z0-9_.-]+$' | while IFS= read -r prop; do
 		resetprop -d -p "${prop}"
@@ -189,7 +190,14 @@ if [[ "${config_pif_props}" == "1" ]]; then
 fi
 
 # Spoof /system/lib64/libstagefright.so
+# Spoof /system/lib64/libstagefright.so
 if [[ "${config_spoof_libstagefright}" == "1" ]]; then
+        if [[ "${config_brene_logs}" == "1" ]]; then
+                brene_log ""
+                brene_log "########################"
+                brene_log "Spoof libstagefright"
+                brene_log "########################"
+        fi
         path=/system/lib64/libstagefright.so
         safe="$(printf '%s' "${path}" | tr '/' '_')"
         fake_file_path="${PERSISTENT_DIR}/fake_files/${safe}"
@@ -205,7 +213,14 @@ if [[ "${config_spoof_libstagefright}" == "1" ]]; then
 fi
 
 # Hide LineageOS Strings
+# Hide LineageOS Strings
 if [[ "${config_hide_lineage_strings}" == "1" ]]; then
+	if [[ "${config_brene_logs}" == "1" ]]; then
+		brene_log ""
+		brene_log "########################"
+		brene_log "Hide LineageOS Strings"
+		brene_log "########################"
+	fi
 	brene_find /system /system_ext /vendor /product \( -iname "*sepolicy.cil" -o -iname "*file_contexts" \) -print0 | while IFS= read -r -d '' path; do
 		safe="$(printf '%s' "$path" | tr '/' '_')"
 		fake_file_path="${PERSISTENT_DIR}/fake_files/${safe}"
@@ -236,8 +251,13 @@ if [[ "${config_hide_lineage_strings}" == "1" ]]; then
 	done
 fi
 
-# Hide LineageOS Strings in RC files
 if [[ "${config_hide_lineage_strings}" == "1" ]]; then
+        if [[ "${config_brene_logs}" == "1" ]]; then
+                brene_log ""
+                brene_log "########################"
+                brene_log "Hide LineageOS Strings (RC)"
+                brene_log "########################"
+        fi
         brene_find /system /system_ext /vendor /product -iname "*.rc" -print0 | while IFS= read -r -d '' path; do
                 if grep -iq "lineage" "${path}"; then
                         safe="$(printf '%s' "$path" | tr '/' '_')"
@@ -258,64 +278,61 @@ if [[ "${config_hide_lineage_strings}" == "1" ]]; then
 fi
 
 # Max Saturation
+# Max Saturation
 if [[ "${config_saturation}" == "1" ]]; then
 	command -v service >/dev/null 2>&1 && service call SurfaceFlinger 1022 f 2.0
 fi
+# Show Refresh Rate
 # Show Refresh Rate
 if [[ "${config_show_refresh_rate}" == "1" ]]; then
     command -v service >/dev/null 2>&1 && service call SurfaceFlinger 1034 i32 1
 fi
 
 # Set logcat and logd buffer to 64K
-# Smaller ring buffers cut CPU overhead and battery drain. No -p: upstream
-# e6bcf86 dropped it because a persistent resetprop made the override revert
-# after reboot on some devices.
+# Set logcat and logd buffer to 64K
 if [[ "${config_shrink_buffer_size}" == "1" ]]; then
     command -v logcat >/dev/null 2>&1 && logcat -G 64K 2>/dev/null || true
     resetprop -n persist.logd.size 65536 2>/dev/null || true
 fi
 
 #### Hide some sus paths, effective only for processes that are marked umounted with uid >= 10000 ####
-# Spoof Android System Properties
+#### Hide some sus paths, effective only for processes that are marked umounted with uid >= 10000 ####
 if [[ "${config_spoof_system_properties}" == "1" ]]; then
    brene_spoof_system_properties || true
 
-   # Set after vold has settled so the encrypted transition still reaches
-   # vendor init triggers (upstream fix).
    if_prop_exits_resetprop_n "ro.crypto.state" "encrypted"
 fi
+# Spoof Fingerprint Properties
 # Spoof Fingerprint Properties
 if [[ "${config_spoof_fingerprint_properties}" == "1" ]]; then
    brene_spoof_fingerprint_props || true
 fi
 # Spoof UTC Properties
+# Spoof UTC Properties
 if [[ "${config_spoof_utc_properties}" == "1" ]]; then
    brene_spoof_utc_props || true
 fi
+# Spoof Date Properties
 # Spoof Date Properties
 if [[ "${config_spoof_date_properties}" == "1" ]]; then
    brene_spoof_date_props || true
 fi
 # Spoof OS Security Patch Level Property
+# Spoof OS Security Patch Level Property
 if [[ "${config_spoof_os_security_patch_level_property}" == "1" ]]; then
    brene_spoof_os_security_patch_props || true
 fi
+# Spoof Vendor Security Patch Level Property
 # Spoof Vendor Security Patch Level Property
 if [[ "${config_spoof_vendor_security_patch_level_property}" == "1" ]]; then
    brene_spoof_vendor_security_patch_props || true
 fi
 
-# Fingerprint tail alignment (re-assert): PIF has written the live fingerprint by
-# now; keep id/incremental/flavor coherent with it (idempotent, writes on change only).
 if [[ "${config_align_fingerprint_tail}" == "1" ]]; then
-    brene_align_fingerprint_tail || true
+    brene_align_fingerprint_tail "Fingerprint Tail (recheck)" || true
 fi
 
-## First we need to wait until files are accessible in /sdcard ##
 _wait_count=0; until [[ -e "/sdcard/Android" ]] || [[ "${_wait_count}" -ge 10 ]]; do sleep 1; _wait_count=$((_wait_count + 1)); done
-# Helper: wait until DIR shows at least one entry (dent existence alone is not
-# enough — FUSE/vold can create the mountpoint before readdir returns entries).
-# Bounded only; never blocks boot. rc=0 when non-empty, 1 on timeout.
 brene_wait_for_nonempty_listing() {
 	local _bwf_dir="$1" _bwf_max="${2:-15}" _bwf_n=0 _bwf_cnt
 	while [[ "${_bwf_n}" -lt "${_bwf_max}" ]]; do
@@ -327,13 +344,13 @@ brene_wait_for_nonempty_listing() {
 }
 
 ## Remove the '..5.u.S' leftover ##
-## THe reason why this sus file is created is because users have grant the MANAGE_EXTERNAL_STORAGE permission for the apps that detecting sus files in /sdcard, or in /sdcard/Android/data where the apps are exploiting the unicode bugs to create files arbitrary.
+## Remove the '..5.u.S' leftover ##
+## susfs redirects the sus path to a supposed not-existing path named '..5.u.S', and this is the only way to settle the cross check of returned errno from various syscalls, but one disadvantage is that if the path itself can be written/created by the app (MANAGE_EXTERNAL_STORAGE granted), then it is futile to hide it, but at least here we automatically delete them on each boot.
 ## susfs redirects the sus path to a supposed not-existing path named '..5.u.S', and this is the only way to settle the cross check of returned errno from various syscalls, but one disadvantage is that if the path itself can be written/created by the app (MANAGE_EXTERNAL_STORAGE granted), then it is futile to hide it, but at least here we automatically delete them on each boot.
 ## The best practise is to revoke MANAGE_EXTERNAL_STORAGE permission for all third party apps.
-# [ -e "/sdcard/..5.u.S" ] && rm -rf "/sdcard/..5.u.S"
-# [ -e "/sdcard/Android/data/..5.u.S" ] && rm -rf "/sdcard/Android/data/..5.u.S"
-# [ -e "/sdcard/Android/media/..5.u.S" ] && rm -rf "/sdcard/Android/media/..5.u.S"
+## The best practise is to revoke MANAGE_EXTERNAL_STORAGE permission for all third party apps.
 
+# Remove "..5.u.S"
 # Remove "..5.u.S"
 TARGET="..5.u.S"
 TARGET1="/sdcard/${TARGET}"
@@ -347,6 +364,7 @@ done
 pgrep -x inotifyd >/dev/null 2>&1 || inotifyd "${MODDIR}/inotify.sh" /sdcard:n &
 
 # Hide KernelSU directories
+# Hide KernelSU directories
 if [[ "${config_hide_ksu_directories}" == "1" ]]; then
 	sh "${MODDIR}/remove_ksu_directory.sh"
 	inotifyd "${MODDIR}/remove_ksu_directory.sh" /storage/emulated/0/Android/data:n &
@@ -355,11 +373,11 @@ if [[ "${config_hide_ksu_directories}" == "1" ]]; then
 fi
 
 ## For paths that are frequently modified, we can add them via 'add_sus_path_loop' ##
+## For paths that are frequently modified, we can add them via 'add_sus_path_loop' ##
+## Be reminded that without HMA's vold app data enabled, added sus_paths are still vulnerable to zwc exploit, so in this case users also have to add its underlying path as well ##
 ## Be reminded that without HMA's vold app data enabled, added sus_paths are still vulnerable to zwc exploit, so in this case users also have to add its underlying path as well ##
 
-# Suspicious Paths Hiding
 
-# Non-standard /sdcard
 __brene_hide_nonstandard_sdcard_once() {
 	local _hide_n=0 _seen=0
 	local pass i x
@@ -370,8 +388,6 @@ __brene_hide_nonstandard_sdcard_once() {
 		standard_paths="Alarms Android Audiobooks DCIM Documents Download Movies Music Notifications Pictures Podcasts Recordings Ringtones MIUI"
 	fi
 
-	# POSIX nullglob emulation inside function scope (set -- is local to functions):
-	# an unmatched glob stays literal, so detect and drop it.
 	set -- /sdcard/*
 	if [ "$#" -eq 1 ] && [ ! -e "$1" ]; then set --; fi
 	_seen=$#
@@ -410,7 +426,6 @@ if [[ "${config_paths_hiding__non_standard_sdcard}" == "1" ]]; then
 	__brene_hide_nonstandard_sdcard_once
 fi
 
-# Non-standard /sdcard/Android
 __brene_hide_nonstandard_sdcard_android_once() {
 	local _hide_n=0 _seen=0
 	local pass i x
@@ -454,16 +469,13 @@ if [[ "${config_paths_hiding__non_standard_sdcard_android}" == "1" ]]; then
 	__brene_hide_nonstandard_sdcard_android_once
 fi
 
-# Late second pass: storage often populates after boot-completed. Same functions,
-# same allowlists — idempotent retry only. Backgrounded so boot is never blocked.
-# NOTE: [b] self-match pattern won't match an attacker argv containing the plain
-# string; rc=127 (no pgrep) or other errors -> single safe pass only, never a respawn loop.
 if pgrep -f "[b]rene_hide_nonstandard_sdcard" >/dev/null 2>&1; then
    :
 else
    _pgrep_rc=$?
    if [[ "${_pgrep_rc}" -eq 1 || "${_pgrep_rc}" -eq 127 ]]; then
       ( sleep 60
+        [[ "${config_brene_logs}" == "1" ]] && { brene_log ""; brene_log "####################"; brene_log "Late Sdcard Retry"; brene_log "####################"; }
         [[ "${config_paths_hiding__non_standard_sdcard}" == "1" ]] && __brene_hide_nonstandard_sdcard_once
         [[ "${config_paths_hiding__non_standard_sdcard_android}" == "1" ]] && __brene_hide_nonstandard_sdcard_android_once
         [[ "${config_brene_logs}" == "1" ]] && brene_log "[retry] late sdcard hide pass done"
@@ -471,7 +483,6 @@ else
    fi
 fi
 
-# Hide Custom Recovery Paths
 if [[ "${config_hide_custom_recovery}" == "1" ]]; then
         if [[ "${config_brene_logs}" == "1" ]]; then
                         brene_log ""
@@ -509,6 +520,7 @@ if [[ "${config_hide_custom_recovery}" == "1" ]]; then
 fi
 
 # /data/local/tmp
+# /data/local/tmp
 if [[ "${config_paths_hiding__data_local_tmp}" == "1" ]]; then
 	if [[ "${config_brene_logs}" == "1" ]]; then
 			brene_log ""
@@ -524,6 +536,7 @@ if [[ "${config_paths_hiding__data_local_tmp}" == "1" ]]; then
 fi
 
 # Fix /data/local/tmp Inconsistencies
+# Fix /data/local/tmp Inconsistencies
 if [[ "${config_fix_data_local_tmp_inconsistencies}" == "1" ]]; then
         target_folder="/data/local/tmp"
         if [ ! -L "${target_folder}" ]; then
@@ -532,13 +545,15 @@ if [[ "${config_fix_data_local_tmp_inconsistencies}" == "1" ]]; then
         chown shell:shell "${target_folder}"
         chcon u:object_r:shell_data_file:s0 "${target_folder}"
         # add_sus_kstat_statically </path/of/file_or_directory> <ino> <dev> <nlink> <size> <atime> <atime_nsec> <mtime> <mtime_nsec> <ctime> <ctime_nsec> <blocks> <blksize>
+        # add_sus_kstat_statically </path/of/file_or_directory> <ino> <dev> <nlink> <size> <atime> <atime_nsec> <mtime> <mtime_nsec> <ctime> <ctime_nsec> <blocks> <blksize>
         # ino -> %i, dev -> %d, nlink -> %h, atime -> %X, mtime -> %Y, ctime -> %Z, size -> %s, blocks -> %b, blksize -> %B
+        # ino -> %i, dev -> %d, nlink -> %h, atime -> %X, mtime -> %Y, ctime -> %Z, size -> %s, blocks -> %b, blksize -> %B
+        # Example: stat -c %i <path>
         # Example: stat -c %i <path>
         ${SUSFS_BIN} add_sus_kstat_statically "${target_folder}" '100' 'default' 'default' '4096' 'default' 'default' 'default' 'default' 'default' 'default' '8' '4096' 2>/dev/null || true
         fi
 fi
 
-# Manually-installed User CA Certificates
 if [[ "${config_paths_hiding__user_ca_certs}" == "1" ]]; then
 	if [[ "${config_brene_logs}" == "1" ]]; then
 			brene_log ""
@@ -557,7 +572,6 @@ if [[ "${config_paths_hiding__user_ca_certs}" == "1" ]]; then
 	done
 fi
 
-# /sdcard/Android/[data | media | obb]
 if [[ "${config_paths_hiding__sdcard_android_data_media_obb}" == "1" ]]; then
 	if [[ "${config_brene_logs}" == "1" ]]; then
 			brene_log ""
@@ -582,30 +596,15 @@ if [[ "${config_paths_hiding__sdcard_android_data_media_obb}" == "1" ]]; then
 		[[ -e "${full_path3}" ]] && brene_sus_path_loop "${full_path3}"
 	done
 
-	# path1=/sdcard/Android/data
-	# path2=/sdcard/Android/media
-	# path3=/sdcard/Android/obb
-	# for i in $(pm list packages -3 | cut -d':' -f2); do
-	# 	full_path1="${path1}/${i}"
-	# 	full_path2="${path2}/${i}"
-	# 	full_path3="${path3}/${i}"
-	# 	[[ -e "${full_path1}" ]] && brene_sus_path_loop "${full_path1}"
-	# 	[[ -e "${full_path2}" ]] && brene_sus_path_loop "${full_path2}"
-	# 	[[ -e "${full_path3}" ]] && brene_sus_path_loop "${full_path3}"
-	# done
 fi
 
-## For paths that are read-only all the time, add them via 'add_sus_path' ##
 if [[ "${config_brene_logs}" == "1" ]]; then
 		brene_log ""
 		brene_log "#############################"
 		brene_log "Other Suspicious Paths Hiding"
 		brene_log "#############################"
 fi
-# brene_sus_path "/sys/block/loop0"
 
-# Load custom_sus_map.txt (validated: absolute path only, flags rejected,
-# empty/comment skipped, missing warned; fail-safe per line)
 if [[ -e "${PERSISTENT_DIR}/custom_sus_map.txt" ]]; then
 	while IFS= read -r i || [[ -n "${i}" ]]; do
 		__brene_cleaned=$(__brene_clean_hide_path "${i}"); __brene_clean_rc=$?
@@ -613,7 +612,6 @@ if [[ -e "${PERSISTENT_DIR}/custom_sus_map.txt" ]]; then
 	done < "${PERSISTENT_DIR}/custom_sus_map.txt"
 fi
 
-# Load custom_sus_path.txt (validated; same rules as custom_sus_map.txt)
 if [[ -e "${PERSISTENT_DIR}/custom_sus_path.txt" ]]; then
 	while IFS= read -r i || [[ -n "${i}" ]]; do
 		__brene_cleaned=$(__brene_clean_hide_path "${i}"); __brene_clean_rc=$?
@@ -621,16 +619,13 @@ if [[ -e "${PERSISTENT_DIR}/custom_sus_path.txt" ]]; then
 	done < "${PERSISTENT_DIR}/custom_sus_path.txt"
 fi
 
-# Load custom_sus_path_loop.txt (validated; same rules as custom_sus_map.txt)
 if [[ -e "${PERSISTENT_DIR}/custom_sus_path_loop.txt" ]]; then
 	while IFS= read -r i || [[ -n "${i}" ]]; do
-		# Validated above: absolute path only, flags rejected, missing warned
 		__brene_cleaned=$(__brene_clean_hide_path "${i}"); __brene_clean_rc=$?
 		case "${__brene_clean_rc}" in 0|3) brene_sus_path_loop "${__brene_cleaned}" || true ;; esac
 	done < "${PERSISTENT_DIR}/custom_sus_path_loop.txt"
 fi
 
-# Load custom_sus_mount.txt (validated; same rules as custom_sus_map.txt)
 if [[ -e "${PERSISTENT_DIR}/custom_sus_mount.txt" ]]; then
 	while IFS= read -r i || [[ -n "${i}" ]]; do
 		__brene_cleaned=$(__brene_clean_hide_path "${i}"); __brene_clean_rc=$?
@@ -638,7 +633,6 @@ if [[ -e "${PERSISTENT_DIR}/custom_sus_mount.txt" ]]; then
 	done < "${PERSISTENT_DIR}/custom_sus_mount.txt"
 fi
 
-# Load custom_kernel_umount.txt (validated; same rules as custom_sus_map.txt)
 if [[ -e "${PERSISTENT_DIR}/custom_kernel_umount.txt" ]]; then
         while IFS= read -r i || [[ -n "${i}" ]]; do
                 __brene_cleaned=$(__brene_clean_hide_path "${i}"); __brene_clean_rc=$?
@@ -647,27 +641,46 @@ if [[ -e "${PERSISTENT_DIR}/custom_kernel_umount.txt" ]]; then
 fi
 
 #### Hide the mmapped real file from various maps in /proc/self/, effective only for processes that are marked umounted with uid >= 10000 ####
+#### Hide the mmapped real file from various maps in /proc/self/, effective only for processes that are marked umounted with uid >= 10000 ####
+## - *Please note that it is better to do it in boot-completed starge
 ## - *Please note that it is better to do it in boot-completed starge
 ##   Since some target path may be mounted by ksu, and make sure the
+##   Since some target path may be mounted by ksu, and make sure the
+##   target path has the same dev number as the one in global mnt ns,
 ##   target path has the same dev number as the one in global mnt ns,
 ##   otherwise the sus map flag won't be seen on the umounted proocess.
+##   otherwise the sus map flag won't be seen on the umounted proocess.
+## - *Besides, if the source files get umounted and stay only in like zygote's memory maps,
 ## - *Besides, if the source files get umounted and stay only in like zygote's memory maps,
 ##   then it will not work as well since sus_map checks for real file's inode.
+##   then it will not work as well since sus_map checks for real file's inode.
+## - To debug the namespace issue, users can do this in a root shell:
 ## - To debug the namespace issue, users can do this in a root shell:
 ##   1. Find the pid and uid of a opened umounted app by running
+##   1. Find the pid and uid of a opened umounted app by running
+##      ps -enf | grep myapp
 ##      ps -enf | grep myapp
 ##   2. cat /proc/<pid_of_myapp>/maps | grep "<added/sus_map/path>"'
+##   2. cat /proc/<pid_of_myapp>/maps | grep "<added/sus_map/path>"'
+##   3. In other root shell, run
 ##   3. In other root shell, run
 ##      cat /proc/1/mountinfo | grep "<added/sus_map/path>"'
+##      cat /proc/1/mountinfo | grep "<added/sus_map/path>"'
+##   4. Finally compare the dev number with both output and see if they are consistent,
 ##   4. Finally compare the dev number with both output and see if they are consistent,
 ##      if so, then it should be working, but if not, then the added sus_map path
+##      if so, then it should be working, but if not, then the added sus_map path
+##      is probably not working, and you have to find out which mnt ns the dev number
 ##      is probably not working, and you have to find out which mnt ns the dev number
 ##      from step 2 belongs to, and add the path from that mnt ns:
+##      from step 2 belongs to, and add the path from that mnt ns:
+##         busybox nsenter -t <pid_of_mnt_ns_the_target_dev_number_belongs_to> -m ksu_susfs add_sus_map <target_path>
 ##         busybox nsenter -t <pid_of_mnt_ns_the_target_dev_number_belongs_to> -m ksu_susfs add_sus_map <target_path>
 ## Hide some zygisk modules ##
+## Hide some zygisk modules ##
+# brene_sus_map /data/adb/modules/my_module/zygisk/arm64-v8a.so
 # brene_sus_map /data/adb/modules/my_module/zygisk/arm64-v8a.so
 
-# Injections Hiding
 if [[ "${config_hide_injections}" == "1" ]]; then
         if [[ "${config_brene_logs}" == "1" ]]; then
                         brene_log ""
@@ -694,24 +707,31 @@ if [[ "${config_hide_injections}" == "1" ]]; then
 fi
 
 #### Adding sus mounts to umount list via built-in KernelSU kernel umount (not via add_try_umount from old susfs) ####
+#### Adding sus mounts to umount list via built-in KernelSU kernel umount (not via add_try_umount from old susfs) ####
+# cat <<EOF >/dev/null
 # cat <<EOF >/dev/null
 # ## Don't forget to notify KernelSU that all ksu modules all mounted and ready ##
+# ## Don't forget to notify KernelSU that all ksu modules all mounted and ready ##
+# /data/adb/ksu/bin/ksud kernel notify-module-mounted
 # /data/adb/ksu/bin/ksud kernel notify-module-mounted
 
 # ## This is just an example to add the sus mounts to kernel umount ##
+# ## This is just an example to add the sus mounts to kernel umount ##
+# if [ ! -f "/data/adb/susfs_no_auto_add_kernel_umount" ]; then
 # if [ ! -f "/data/adb/susfs_no_auto_add_kernel_umount" ]; then
 # 	cat /proc/1/mountinfo | grep -E "^2[0-9]{9,} .*$|KSU" | awk '{print $5}' | while read -r LINE; do /data/adb/ksu/bin/ksud kernel umount add --flags 2 "${LINE}" 2>/dev/null; done
+# 	cat /proc/1/mountinfo | grep -E "^2[0-9]{9,} .*$|KSU" | awk '{print $5}' | while read -r LINE; do /data/adb/ksu/bin/ksud kernel umount add --flags 2 "${LINE}" 2>/dev/null; done
 # fi
+# fi
+# EOF
 # EOF
 
 #### Adding sus mounts to umount list via built-in KernelSU kernel umount (not via add_try_umount from old susfs) ####
-# Umount Suspicious Mounts
+#### Adding sus mounts to umount list via built-in KernelSU kernel umount (not via add_try_umount from old susfs) ####
 if [[ "${config_umount_suspicious_mounts}" == "1" ]]; then
-	## Don't forget to notify KernelSU that all ksu modules all mounted and ready ##
 	${KSU_BIN} kernel notify-module-mounted 2>/dev/null || true
 
 	cat /proc/1/mountinfo | grep -E "^2[0-9]{9,} .*$|KSU" | awk '{print $5}' | sed -e 's/\\040/ /g' -e 's/\\011/	/g' -e 's/\\134/\\/g' | while IFS= read -r mount; do
-		# \012 (newline) cannot survive a line-based loop: skip honestly instead of corrupting the path
 		case "${mount}" in
 			*\\012*)
 				[[ "${config_brene_logs}" == "1" ]] && brene_log "[skip] mountpoint contains newline escape (\\012): ${mount}"
@@ -727,6 +747,7 @@ if [[ "${config_umount_suspicious_mounts}" == "1" ]]; then
 fi
 
 # Hide framework-res.apk
+# Hide framework-res.apk
 if [[ "${config_hide_framework_res_apk}" == "1" ]]; then
 	brene_find /system -iname "*framework-res.apk" -print0 | while IFS= read -r -d '' path; do
 		brene_sus_map "${path}" || true
@@ -735,7 +756,6 @@ fi
 
 
 
-# Android Verified Boot Hash Spoofing
 if [[ "${config_spoof_verified_boot_hash}" != '' ]]; then
 	case "${config_spoof_verified_boot_hash}" in
 		*[!0-9a-fA-F]*|"") ;;
@@ -743,6 +763,7 @@ if [[ "${config_spoof_verified_boot_hash}" != '' ]]; then
 	esac
 fi
 
+# Hide third party apps
 # Hide third party apps
 if [[ "${config_hide_third_party_apps}" == "1" ]]; then
 	[ -f "${MODDIR}/apply_uid_filter.sh" ] && config_brene_logs="${config_brene_logs}" sh "${MODDIR}/apply_uid_filter.sh"

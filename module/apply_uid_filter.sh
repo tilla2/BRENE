@@ -1,9 +1,3 @@
-#!/bin/sh
-# Blanket getpriority uid filter: hide every package whose uid is in the app
-# range (10000-19999), system or data app. The kernel resolves each name from
-# /data/data/<pkg>, so a single unresolvable name fails the whole call; names
-# without a data dir are skipped. POSIX sh: KernelSU runs module scripts with
-# BusyBox ash / mksh, so no bashisms here.
 PERSISTENT_DIR=/data/adb/brene
 SUSFS_BIN=/data/adb/ksu/bin/susfs
 LOG="${PERSISTENT_DIR}/log.txt"

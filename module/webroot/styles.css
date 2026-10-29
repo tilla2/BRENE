@@ -325,7 +325,6 @@ md-tabs {
 	top: -1px;
 }
 
-/* Fix toggle alignment on cards with long multi-line descriptions */
 .card-row {
 	align-items: flex-start;
 }
@@ -340,7 +339,6 @@ md-tabs {
 	flex-shrink: 0;
 }
 
-/* Force long unbroken paths (e.g. /system/lib64/...) to wrap instead of overflowing past the toggle */
 .card-row__title,
 .card-row__sub,
 .card-row__tag--code {
@@ -348,13 +346,11 @@ md-tabs {
 	word-break: break-word;
 }
 
-/* Rounded corners for Additional Hiding */
 .additional-hiding-group {
     border-radius: 16px;
     overflow: hidden;
 }
 
-/* Round Additional Hiding outer card corners */
 .additional-hiding-group > .card-row:first-child {
     border-radius: 16px 16px 0 0;
 }

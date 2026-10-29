@@ -1,5 +1,3 @@
-#!/bin/bash
-# shellcheck disable=SC2154
 MODDIR=${0%/*}
 KSU_BIN=/data/adb/ksud
 KSU_MODULES_DIR=/data/adb/modules
@@ -7,24 +5,18 @@ SUSFS_BIN=/data/adb/ksu/bin/susfs
 PERSISTENT_DIR=/data/adb/brene
 DEST_BIN_DIR=/data/adb/ksu/bin
 
-# Load utils
 [[ -e "${MODDIR}/utils.sh" ]] && source "${MODDIR}/utils.sh"
-# Load config (allowlist parser; never source untrusted file)
-# POSIX sh compatible (BusyBox ash, mksh, bash, dash) - KernelSU runs boot
-# scripts in BusyBox ash, so no bashisms here (no [[, no printf -v, no ${v:1:-1}).
 if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
   while IFS='=' read -r k v || [ -n "$k" ]; do
-    # Strip CR (handle CRLF-edited files)
-    k=$(printf '%s' "$k" | tr -d '\r')
-    v=$(printf '%s' "$v" | tr -d '\r')
-    # Strip one pair of surrounding single or double quotes
+    k=$(printf '%s' "$k" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    v=$(printf '%s' "$v" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     case "$v" in
       \'*\'|\"*\")
         v=${v#?}
         v=${v%?}
         ;;
     esac
-    # Allowlist: key must be config_ + [A-Za-z0-9_] only
+    v=$(printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     case "$k" in
       config_*) ;;
       *) continue ;;
@@ -32,14 +24,6 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     case "$k" in
       *[!A-Za-z0-9_]* ) continue ;;
     esac
-    # shellcheck disable=SC2034 # config_* values are consumed across module scripts
-    # Assign without eval (safe in BusyBox ash, dash, mksh, bash):
-    # a plain quoted 'name="$v"' assignment does no word splitting or
-    # globbing and never re-executes the value, so '$(...)', backticks
-    # and ';' inside $v stay inert. The key is already allowlisted to
-    # config_[A-Za-z0-9_]; dispatch on the name explicitly so that no
-    # dynamic variable name (and no eval) is needed. When adding a new
-    # config_ key, extend this list.
     case "$k" in
       config_align_fingerprint_tail) config_align_fingerprint_tail="$v" ;;
       config_brene_logs) config_brene_logs="$v" ;;
@@ -90,7 +74,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_usb_debugging) config_usb_debugging="$v" ;;
       config_spoof_verified_boot_hash) config_spoof_verified_boot_hash="$v" ;;
       config_wireless_debugging) config_wireless_debugging="$v" ;;
-      *) continue ;; # unknown config_ key: ignore
+      *) continue ;;
     esac
   done < "${PERSISTENT_DIR}/config.sh"
 fi
@@ -100,20 +84,11 @@ if [[ "${config_brene_logs}" == "1" ]]; then
         echo "service.sh ✅" >> "${PERSISTENT_DIR}/log.txt"
 fi
 
-# Fingerprint tail alignment: derive id/incremental/flavor from the LIVE fingerprint
-# (e.g. PIF's). Runs after post-fs-data; boot-completed.sh re-asserts (timing race).
 if [[ "${config_align_fingerprint_tail}" == "1" ]]; then
-    brene_align_fingerprint_tail || true
+    brene_align_fingerprint_tail "Fingerprint Tail (recheck)" || true
 fi
 
-# Best-effort update for custom kstat entries at a later stage.
-# Mapping (see brene_kstat_update_line in utils.sh):
-#   normal (bare path) -> update_sus_kstat
-#   full_clone (fullclone:/path) -> update_sus_kstat_full_clone
-#   static (13-field line) -> update_sus_kstat (completes the static add
-#     after mounts are up, per susfs docs; same as brene_sus_kstat_static)
-# Every outcome is logged as [custom_sus_kstat:update*]: OK / FAILED rc=N.
-if [[ -e "${PERSISTENT_DIR}/custom_sus_kstat.txt" ]]; then
+if [[ -e "${PERSISTENT_DIR}/custom_sus_kstat.txt" ]] && grep -qEv '^[[:space:]]*(#|$)' "${PERSISTENT_DIR}/custom_sus_kstat.txt"; then
         if [[ "${config_brene_logs}" == "1" ]]; then
                         brene_log ""
                         brene_log "########################"
@@ -125,9 +100,6 @@ if [[ -e "${PERSISTENT_DIR}/custom_sus_kstat.txt" ]]; then
         done < "${PERSISTENT_DIR}/custom_sus_kstat.txt"
 fi
 
-# The manager does not run boot-completed.sh on every ROM/boot, so apply the
-# getpriority uid filter here too: wait for boot to complete, then let
-# apply_uid_filter.sh build the list (PackageManager is ready by then).
 if [ "${config_hide_third_party_apps}" = "1" ] && [ -f "${MODDIR}/apply_uid_filter.sh" ]; then
 	(
 		i=0

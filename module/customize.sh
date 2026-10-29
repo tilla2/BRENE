@@ -18,9 +18,6 @@ echo "██████╔╝██║  ██║███████╗██
 echo "╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚══════╝"
 echo ""
 
-# Hot Install Support
-# Only ask for a hot install when the manager can actually perform one
-# (upstream 6c9a43d). Otherwise the verified copy further down takes over.
 if [[ "${KSU_HAS_HOT_INSTALL}" == "true" ]]; then
 	export MODULE_HOT_INSTALL_REQUEST="true"
 fi
@@ -47,7 +44,6 @@ if [[ ! -d "${DEST_BIN_DIR}" ]]; then
 fi
 
 chmod +x "${MODPATH}/tools/susfs" 2>/dev/null || true
-# pinned known-good susfs hash
 SUSFS_PINNED_SHA256="cb16825fb8c949775c1bf692263d9f59a52f12127fdcacc531b6a612e258a831"
 if command -v sha256sum >/dev/null 2>&1; then
   SUSFS_ACTUAL_SHA256="$(sha256sum "${MODPATH}/tools/susfs" 2>/dev/null | awk '{print $1}' || true)"
@@ -97,8 +93,6 @@ echo "[✅] Preparing brene persistent directory (${PERSISTENT_DIR})"
 mkdir -p "${PERSISTENT_DIR}"
 chmod 700 "${PERSISTENT_DIR}" || true
 
-# Back up the installed shared SuSFS binary so post-fs-data.sh can restore it
-# when another module removes it (upstream 5457b3a).
 [ -f "${DEST_BIN_DIR}/susfs" ] && cp -pf "${DEST_BIN_DIR}/susfs" "${PERSISTENT_DIR}/susfs" 2>/dev/null || true
 
 files="
@@ -125,7 +119,6 @@ else
 		# Skip empty lines or comments
 		[[ -z "${key// /}" || "${key// /}" == "#"* ]] && continue
 
-		# Renamed keys: handled by the migration blocks below (old value wins over defaults).
 		case "${key}" in
 			config_spoof_os_security_patch_level_property|config_spoof_uname|config_custom_spoof_uname|config_hide_suspicious_pty|config_spoof_verified_boot_hash) continue ;;
 		esac
@@ -139,8 +132,6 @@ else
 
 	done < "${MODPATH}/config.sh"
 
-	# Migrate renamed OS patch key, respecting explicit user opt-out (old=0 -> new=0).
-	# Vendor key goes through the normal generic loop above (=1). Old key is kept (dead keys are repo norm).
 	if ! tr -d '\r' < "${PERSISTENT_DIR}/config.sh" 2>/dev/null | grep -q '^config_spoof_os_security_patch_level_property='; then
 		_brene_old_patch_val=""
 		while IFS='=' read -r _mk _mv || [ -n "$_mk" ]; do
@@ -166,9 +157,6 @@ else
 		_brene_old_patch_val=""; _mk=""; _mv=""
 	fi
 
-	# Migrate renamed keys to upstream names (old value wins over shipped defaults).
-	# Old keys are kept (dead keys are repo norm). The generic loop above skips
-	# new keys, so defaults are handled here when no old value exists.
 	for _brene_pair in \
 		"config_uname_spoofing config_spoof_uname" \
 		"config_custom_uname_spoofing config_custom_spoof_uname" \
@@ -207,20 +195,16 @@ else
 	_brene_pair=""; _brene_old_key=""; _brene_new_key=""; _brene_old_val=""; _brene_def_val=""
 fi
 
-# Reset fake_files folder (recreated so the boot scripts always find it)
 [[ -d "${PERSISTENT_DIR}/fake_files" ]] && rm -rf "${PERSISTENT_DIR}/fake_files"
 mkdir -p "${PERSISTENT_DIR}/fake_files"
 
-# Enable WebUI without reboot (keep id in sync with module.prop)
 MODDIR="/data/adb/modules/brene"
 MODULES_PATH="/data/adb/modules"
 
-# Skipped when the manager hot-installs the module itself (see Hot Install above)
 if [[ "${MODULE_HOT_INSTALL_REQUEST}" == "true" ]]; then
 	echo '[✅] Hot-install requested from the module manager'
 else
 
-# Copy first, drop the old install only on success (never rm before a verified copy)
 if [ -n "${MODPATH}" ] && [ -d "${MODPATH}" ]; then
 	rm -rf "${MODDIR}.bak"
 	[ -d "${MODDIR}" ] && mv "${MODDIR}" "${MODDIR}.bak"

@@ -1,5 +1,3 @@
-# shellcheck disable=SC2034
-# shellcheck disable=SC2148
 config_paths_hiding__data_local_tmp=1
 config_paths_hiding__non_standard_sdcard=0
 config_paths_hiding__non_standard_sdcard_android=1
@@ -30,7 +28,6 @@ config_saturation=0
 config_brene_logs=0
 config_enable_log=0
 config_hide_addon_d=0
-# Deprecated: merged into config_spoof_system_properties (old key still honored if present).
 config_usb_debugging=0
 config_developer_options=0
 config_wireless_debugging=0
@@ -52,12 +49,5 @@ config_show_refresh_rate=0
 config_disable_child_process_restrictions=1
 config_hide_custom_rom_paths_2=0
 
-# TEE-keybox SKU override for the Build Props Spoofing sync. Empty = automation
-# (name syncs from ro.product.name). When set (e.g. 'myron_eea') the sync writes
-# this name to ro.product.<partition>.name on ALL partitions and to ro.product.name
-# itself, because the value exists on no native partition to sync it from.
 config_spoof_device_name=''
-# Align ro.build.id / ro.build.version.incremental / ro.build.flavor with the LIVE
-# fingerprint (e.g. PIF's) in service.sh + boot-completed.sh. Never touches the
-# fingerprint itself nor any TEE-attested identity field.
 config_align_fingerprint_tail=1

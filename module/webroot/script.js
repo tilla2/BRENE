@@ -72,7 +72,7 @@ const configs = [
 		action: (enabled) => {
 			if (!enabled) return
 			if (!confirm('Sync device properties now?')) return
-			return setFeature(`RESETPROP="";for c in /data/adb/ksu/bin/resetprop /data/adb/magisk/resetprop /data/adb/ap/bin/resetprop;do [ -x "$c" ]&&RESETPROP="$c"&&break;done;[ -z "$RESETPROP" ]&&exit 1;FPT=$(grep -E '^config_spoof_fingerprint_properties=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");DTT=$(grep -E '^config_spoof_date_properties=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");DUT=$(grep -E '^config_spoof_utc_properties=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");SPT=$(grep -E '^config_spoof_os_security_patch_level_property=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");MFP=$(getprop ro.build.fingerprint);MFP="\${MFP//userdebug/user}";MFP="\${MFP//evolution/}";MFP="\${MFP//crdroid/}";MFP="\${MFP//lineage/}";MID=$(getprop ro.build.id);MREL=$(getprop ro.build.version.release);MSDK=$(getprop ro.build.version.sdk);MSDKF=$(getprop ro.build.version.sdk_full);MINC=$(getprop ro.build.version.incremental);MRC=$(getprop ro.build.version.release_or_codename);MDT=$(getprop ro.build.date);MDTU=$(getprop ro.build.date.utc);MSP=$(getprop ro.build.version.security_patch);MTG=$(getprop ro.build.tags);MTP=$(getprop ro.build.type);MBR=$(getprop ro.product.brand);MDEV=$(getprop ro.product.device);MMF=$(getprop ro.product.manufacturer);MMD=$(getprop ro.product.model);MNM=$(getprop ro.product.name);for part in $(getprop|grep -oE '^\\[ro\\.[a-z0-9_]+\\.build\\.fingerprint\\]'|sed -E 's/^\\[ro\\.([a-z0-9_]+)\\.build\\.fingerprint\\]$/\\1/');do [ "$part" = build ]&&continue;[ "$part" = bootimage ]&&continue;for f in fingerprint id version.release version.sdk version.incremental version.release_or_codename version.sdk_full date date.utc version.security_patch tags type;do pn="ro.\${part}.build.\${f}";cv=$(getprop "$pn");[ -z "$cv" ]&&continue;case "$f" in fingerprint)[ "$FPT" = 1 ]||continue;nv="$MFP";;id)nv="$MID";;version.release)nv="$MREL";;version.sdk)nv="$MSDK";;version.incremental)nv="$MINC";;version.release_or_codename)nv="$MRC";;version.sdk_full)nv="$MSDKF";;date)[ "$DTT" = 1 ]||continue;nv="$MDT";;date.utc)[ "$DUT" = 1 ]||continue;nv="$MDTU";;version.security_patch)[ "$SPT" = 1 ]&&continue;nv="$MSP";;tags)nv="$MTG";;type)nv="$MTP";;esac;[ "$cv" != "$nv" ]&&timeout 3 "$RESETPROP" "$pn" "$nv" 2>/dev/null;done;for f in brand device manufacturer model name;do pn="ro.product.\${part}.\${f}";cv=$(getprop "$pn");[ -z "$cv" ]&&continue;case "$f" in brand)nv="$MBR";;device)nv="$MDEV";;manufacturer)nv="$MMF";;model)nv="$MMD";;name)nv="$MNM";;esac;[ "$cv" != "$nv" ]&&timeout 3 "$RESETPROP" "$pn" "$nv" 2>/dev/null;done;done;echo done`)
+			return setFeature(`RESETPROP="";for c in /data/adb/ksu/bin/resetprop /data/adb/magisk/resetprop /data/adb/ap/bin/resetprop;do [ -x "$c" ]&&RESETPROP="$c"&&break;done;[ -z "$RESETPROP" ]&&exit 1;FPT=$(grep -E '^config_spoof_fingerprint_properties=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");DTT=$(grep -E '^config_spoof_date_properties=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");DUT=$(grep -E '^config_spoof_utc_properties=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");SPT=$(grep -E '^config_spoof_os_security_patch_level_property=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2|tr -d '\\r'|sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");MFP=$(getprop ro.build.fingerprint);MFP="\${MFP//userdebug/user}";MFP="\${MFP//evolution/}";MFP="\${MFP//crdroid/}";MFP="\${MFP//lineage/}";MID=$(getprop ro.build.id);MREL=$(getprop ro.build.version.release);MSDK=$(getprop ro.build.version.sdk);MSDKF=$(getprop ro.build.version.sdk_full);MINC=$(getprop ro.build.version.incremental);MRC=$(getprop ro.build.version.release_or_codename);MDT=$(getprop ro.build.date);MDTU=$(getprop ro.build.date.utc);MSP=$(getprop ro.build.version.security_patch);MTG=$(getprop ro.build.tags);MTP=$(getprop ro.build.type);MBR=$(getprop ro.product.brand);MDEV=$(getprop ro.product.device);MMF=$(getprop ro.product.manufacturer);MMD=$(getprop ro.product.model);MNM=$(getprop ro.product.name);DNV=$(grep -E '^config_spoof_device_name[[:space:]]*=' /data/adb/brene/config.sh 2>/dev/null|tail -n1|cut -d= -f2-|tr -d '\\r'|sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//");case "$DNV" in ''|-*) DNV="";; *[!A-Za-z0-9_.-]*) DNV="";; esac;[ -n "$DNV" ]&&MNM="$DNV"&&OLDN=$(getprop ro.product.name)&&timeout 3 "$RESETPROP" ro.product.name "$DNV" 2>/dev/null;for part in $(getprop|grep -oE '^\\[ro\\.[a-z0-9_]+\\.build\\.fingerprint\\]'|sed -E 's/^\\[ro\\.([a-z0-9_]+)\\.build\\.fingerprint\\]$/\\1/');do [ "$part" = build ]&&continue;[ "$part" = bootimage ]&&continue;for f in fingerprint id version.release version.sdk version.incremental version.release_or_codename version.sdk_full date date.utc version.security_patch tags type;do pn="ro.\${part}.build.\${f}";cv=$(getprop "$pn");[ -z "$cv" ]&&continue;case "$f" in fingerprint)[ "$FPT" = 1 ]||continue;nv="$MFP";;id)nv="$MID";;version.release)nv="$MREL";;version.sdk)nv="$MSDK";;version.incremental)nv="$MINC";;version.release_or_codename)nv="$MRC";;version.sdk_full)nv="$MSDKF";;date)[ "$DTT" = 1 ]||continue;nv="$MDT";;date.utc)[ "$DUT" = 1 ]||continue;nv="$MDTU";;version.security_patch)[ "$SPT" = 1 ]&&continue;nv="$MSP";;tags)nv="$MTG";;type)nv="$MTP";;esac;[ "$cv" != "$nv" ]&&timeout 3 "$RESETPROP" "$pn" "$nv" 2>/dev/null;done;for f in brand device manufacturer model name;do pn="ro.product.\${part}.\${f}";cv=$(getprop "$pn");[ -z "$cv" ]&&continue;case "$f" in brand)nv="$MBR";;device)nv="$MDEV";;manufacturer)nv="$MMF";;model)nv="$MMD";;name)nv="$MNM";;esac;[ "$cv" != "$nv" ]&&timeout 3 "$RESETPROP" "$pn" "$nv" 2>/dev/null;done;done;echo done`)
 		},
 	},
 	{ id: 'spoof_fingerprint_properties' },
@@ -97,11 +97,6 @@ const configs = [
 ]
 
 // Open URLs
-// NB: a host allowlist used to sit here (github/gitlab/raw.githubusercontent only)
-// and it silently swallowed every other link -- Telegram, nightly.link, keybox,
-// ... clicked, preventDefault() ran, and nothing happened. Only the scheme needs
-// a check: that is what keeps am start from being handed a tg:/intent:/javascript:
-// URL. element.href already resolves relative hrefs to absolute ones.
 document.querySelectorAll('a[href]').forEach((element) => {
 	element.addEventListener('click', (event) => {
 		event.preventDefault()
@@ -277,7 +272,6 @@ exec(`cat /proc/1/mountinfo | grep -E "^2[0-9]{9,} .*$|KSU" | awk '{print $5}'`)
 	}
 })
 
-// Display-only truncation: keep last full lines (drop partial first line)
 function cutToLastFullLines(s, max) {
 	s = String(s ?? '')
 	if (s.length <= max) return s
@@ -298,7 +292,6 @@ function cutToLastFullLines(s, max) {
 	return cut + '\n…(truncated, showing last full lines)'
 }
 
-// Load logs once
 ;(async () => {
         const container = document.getElementById('logs')
         container.textContent = ''
@@ -385,7 +378,6 @@ function updateConfig(config, value) {
 	})
 }
 
-// quoted config writer
 // Helper function to update config
 function updateConfig2(config, value) {
 	if (!isValidConfigValue(config, value)) {
@@ -520,7 +512,7 @@ if (resetDialog && resetButton) {
         resetDialog.addEventListener('close', () => {
                 if (resetDialog.returnValue !== 'confirm') return
 
-                exec(`cp -f ${MODDIR}/config.sh ${PERSISTENT_DIR}`).then((result) => {
+                exec(`while IFS= read -r line || [ -n "$line" ]; do case "$line" in config_*=*) k="\${line%%=*}"; grep -q "^$k=" ${PERSISTENT_DIR}/config.sh 2>/dev/null || echo "$line" >> ${PERSISTENT_DIR}/config.sh;; esac; done < ${MODDIR}/config.sh`).then((result) => {
                         if (result.errno !== 0) {
                                 toast(result.stderr)
                                 return
@@ -718,7 +710,6 @@ if (resetDialog && resetButton) {
 		entry.dataset.mode = initialMode
 		entry.style.cssText = 'border:1px solid var(--md-sys-color-outline, #79747E); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:8px; margin-bottom:12px;'
 
-		// Normal/FullClone take no values — only Path is rendered (no value fields).
 		const modeRow = document.createElement('div')
 		modeRow.style.cssText = 'display:flex; gap:8px; align-items:center;'
 		const modeLabel = document.createElement('span')
@@ -781,7 +772,6 @@ if (resetDialog && resetButton) {
 		kstatContainer.appendChild(entry)
 	}
 
-	// normal: bare path, fullclone: fullclone:/path, static: 13-field TAB.
 	function serializeKstatEntries() {
 		const entries = kstatContainer.querySelectorAll('.kstat-entry')
 		const outLines = []
@@ -814,9 +804,6 @@ if (resetDialog && resetButton) {
 		const rawLines = (text || '').split('\n').map((l) => l.replace(/\r$/, '').trim()).filter((l) => l && !l.startsWith('#'))
 		let skipped = 0
 		rawLines.forEach((line) => {
-			// fullclone:/path = fullclone (boot-time full snapshot).
-			// 1-field line (no TAB) = normal (boot-time snapshot, bare path).
-			// 13-field TAB line = static (add_sus_kstat_statically).
 			if (line.startsWith('fullclone:')) {
 				const p = line.slice('fullclone:'.length).trim()
 				if (p && p.startsWith('/')) { createKstatEntry({ path: p }, 'fullclone'); return }
@@ -824,7 +811,6 @@ if (resetDialog && resetButton) {
 			}
 			if (!line.includes('\t')) {
 				const p = line.trim()
-				// Legacy fallback first: old hand-edited static lines used spaces instead of TABs.
 				const ws = p.split(/\s+/)
 				if (ws.length === 13 && ws[0].startsWith('/')) {
 					const values = { path: ws[0] }
@@ -834,8 +820,6 @@ if (resetDialog && resetButton) {
 				if (p && p.startsWith('/')) { createKstatEntry({ path: p }, 'normal'); return }
 				skipped++; return
 			}
-			// Canonical format is TAB-separated (serializeKstatEntries + post-fs-data.sh IFS=$'\t').
-			// Whitespace split is only a fallback for legacy hand-edited lines with no spaces in path.
 			const parts = line.split('\t').map((p) => p.trim())
 			if (parts.length !== 13 || !parts[0] || !parts[0].startsWith('/')) { skipped++; return }
 			const values = { path: parts[0] }

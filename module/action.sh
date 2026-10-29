@@ -8,24 +8,18 @@ PERSISTENT_DIR=/data/adb/brene
 DEST_BIN_DIR=/data/adb/ksu/bin
 CUSTOM_ROM_NAMES="lineage|infinity|evolution|crdroid|mistos|axion|pixelos|rising|lunaris|halcyon|havoc|alphadroid|bliss|calyx|derpfest|graphene|lmodroid|lumine|matrixx|clover|yaap|aospa"
 
-# Load utils (POSIX: KernelSU runs these scripts in BusyBox ash)
 [ -e "${MODDIR}/utils.sh" ] && . "${MODDIR}/utils.sh"
-# Load config (allowlist parser; never source untrusted file)
-# POSIX sh compatible (BusyBox ash, mksh, bash, dash) - KernelSU runs boot
-# scripts in BusyBox ash, so no bashisms here (no [[, no printf -v, no ${v:1:-1}).
 if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
   while IFS='=' read -r k v || [ -n "$k" ]; do
-    # Strip CR (handle CRLF-edited files)
-    k=$(printf '%s' "$k" | tr -d '\r')
-    v=$(printf '%s' "$v" | tr -d '\r')
-    # Strip one pair of surrounding single or double quotes
+    k=$(printf '%s' "$k" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    v=$(printf '%s' "$v" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     case "$v" in
       \'*\'|\"*\")
         v=${v#?}
         v=${v%?}
         ;;
     esac
-    # Allowlist: key must be config_ + [A-Za-z0-9_] only
+    v=$(printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     case "$k" in
       config_*) ;;
       *) continue ;;
@@ -33,14 +27,6 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     case "$k" in
       *[!A-Za-z0-9_]* ) continue ;;
     esac
-    # shellcheck disable=SC2034 # config_* values are consumed across module scripts
-    # Assign without eval (safe in BusyBox ash, dash, mksh, bash):
-    # a plain quoted 'name="$v"' assignment does no word splitting or
-    # globbing and never re-executes the value, so '$(...)', backticks
-    # and ';' inside $v stay inert. The key is already allowlisted to
-    # config_[A-Za-z0-9_]; dispatch on the name explicitly so that no
-    # dynamic variable name (and no eval) is needed. When adding a new
-    # config_ key, extend this list.
     case "$k" in
       config_brene_logs) config_brene_logs="$v" ;;
       config_custom_uname_kernel_release) config_custom_uname_kernel_release="$v" ;;
@@ -90,7 +76,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_usb_debugging) config_usb_debugging="$v" ;;
       config_spoof_verified_boot_hash) config_spoof_verified_boot_hash="$v" ;;
       config_wireless_debugging) config_wireless_debugging="$v" ;;
-      *) continue ;; # unknown config_ key: ignore
+      *) continue ;;
     esac
   done < "${PERSISTENT_DIR}/config.sh"
 fi
@@ -106,8 +92,6 @@ echo ""
 echo "Soon"
 echo ""
 
-# ---- Status (fail-safe: every probe has 2>/dev/null + defaults; never blocks) ----
-# POSIX sh compatible (BusyBox ash, mksh, bash, dash): no [[, no ==, no local.
 _brene_getprop() {
   _brene_gp_v=""
   if command -v resetprop >/dev/null 2>&1; then
@@ -141,7 +125,6 @@ _brene_mfr=$(_brene_getprop ro.product.manufacturer 2>/dev/null || true)
 _brene_model=$(_brene_getprop ro.product.model 2>/dev/null || true)
 _brene_device=$(_brene_getprop ro.product.device 2>/dev/null || true)
 _brene_dev_line="${_brene_mfr} ${_brene_model} ${_brene_device}"
-# Trim leading/trailing blanks without bashisms
 _brene_dev_line=$(printf '%s' "$_brene_dev_line" 2>/dev/null | sed -e 's/^ *//' -e 's/ *$//' -e 's/  */ /g' 2>/dev/null || true)
 [ -z "$_brene_dev_line" ] && _brene_dev_line="unknown"
 echo "- Device Model: ${_brene_dev_line}"
@@ -159,8 +142,6 @@ fi
 [ -z "$_brene_kernel" ] && _brene_kernel="unknown"
 echo "- Kernel Version: ${_brene_kernel}"
 
-# Custom ROM detect: match prop values AND top-level dir names against
-# CUSTOM_ROM_NAMES (bounded ls only - no recursive find, never blocks).
 _brene_rom="No"
 _brene_rom_props="$(_brene_getprop ro.build.flavor 2>/dev/null || true) $(_brene_getprop ro.build.display.id 2>/dev/null || true) $(_brene_getprop ro.modversion 2>/dev/null || true) $(_brene_getprop ro.lineage.version 2>/dev/null || true)"
 if printf '%s' "$_brene_rom_props" 2>/dev/null | grep -qiE "${CUSTOM_ROM_NAMES}" 2>/dev/null; then
