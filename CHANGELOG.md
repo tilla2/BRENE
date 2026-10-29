@@ -1,3 +1,29 @@
+## v0.0.73-custom.9 - 2026-10-29
+
+### Module changes since previous release
+- Add files via upload
+- Add files via upload
+- Localised workflow
+- 1970-01-01 fix, sync override for ro.product.name, fingerprint tailing
+
+### Upstream BRENE
+- Manual rebuild; upstream not fetched this run.
+
+### Local customizations
+- Not compared this run (built from branch as-is).
+
+### Module
+- Version: v0.0.73-custom.9 (versionCode 35)
+- [Module Status: ⏱️ | SuSFS Patches: ⏱️] A SuSFS/KernelSU module for SuSFS patched kernels
+- Source: https://github.com/tilla2/BRENE/tree/Custom-Fix
+## v0.0.73-custom.8 - 2026-10-29
+
+### Synced from upstream BRENE
+- (manual rebuild, no new upstream commits)
+
+### Local customizations
+- (no upstream comparison this run; built from branch as-is)
+
 ## v0.0.73-custom.7 - 2026-10-29
 
 ### Synced from upstream BRENE
