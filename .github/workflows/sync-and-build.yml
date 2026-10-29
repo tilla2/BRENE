@@ -23,19 +23,17 @@ concurrency:
 jobs:
   sync-and-build:
     runs-on: ubuntu-latest
-    # NOTE: step-level permissions are ignored by GHA; job-level write covers the two push steps + release step.
     permissions:
       contents: write
       issues: write
     steps:
       - name: Checkout (full history)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
 
       - name: Verify susfs binary hash
         run: |
-          # pinned known-good susfs hash
           PINNED_SUSFS_SHA256="cb16825fb8c949775c1bf692263d9f59a52f12127fdcacc531b6a612e258a831"
           sha256sum module/tools/susfs* 2>/dev/null | tee /tmp/susfs.sha256 || exit 1
           [ -s module/tools/susfs ] || exit 1
@@ -63,7 +61,6 @@ jobs:
         if: inputs.sync == true
         id: merge
         run: |
-          # NOTE: .github is intentionally not protected so upstream workflow fixes still merge.
           PROTECTED_FILES=("README.md" "CHANGELOG.md" "update.json" "BUILD_NUMBER" "module/module.prop" "module/webroot/index.html" "module/webroot/script.js")
           REAL_CONFLICT_FILES=("module/post-fs-data.sh" "module/config.sh" "module/utils.sh")
 
@@ -107,7 +104,7 @@ jobs:
 
       - name: Open issue on conflict
         if: steps.merge.outputs.conflict == 'true'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
           script: |
             const TITLE_PREFIX = "Upstream sync conflict";
@@ -117,7 +114,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Upstream sync conflict - ${new Date().toISOString().slice(0,10)}`,
-              body: "Automatic merge from upstream BRENE failed. Resolve manually:\n```\ngit fetch upstream main\ngit merge upstream/main\n# resolve conflicts\ngit add .\ngit commit\ngit push\n```"
+              body: "Automatic merge from upstream BRENE failed. Resolve manually:\n\`\`\`\ngit fetch upstream main\ngit merge upstream/main\n# resolve conflicts\ngit add .\ngit commit\ngit push\n\`\`\`"
             })
 
       - name: Check for new upstream commits
@@ -132,14 +129,12 @@ jobs:
       - name: Re-apply customizations onto module/
         if: inputs.sync == true && steps.merge.outputs.conflict == 'false' && steps.diff.outputs.count != '0'
         run: |
-          # config_sync_device_props is merged into config_spoof_system_properties
-          # (OR-migration shims in post-fs-data.sh / boot-completed.sh). Verify
-          # the shims survived the merge instead of re-applying legacy code.
           for f in module/post-fs-data.sh module/boot-completed.sh; do
             if ! grep -q 'config_sync_device_props' "$f" || ! grep -q 'config_spoof_system_properties=1' "$f"; then
               echo "::error::OR-migration shim missing in $f" >&2; exit 1
             fi
           done
+
           if ! grep -q '^config_spoof_system_properties=1' module/config.sh; then
             echo "::error::config_spoof_system_properties missing in module/config.sh" >&2; exit 1
           fi
@@ -147,6 +142,10 @@ jobs:
           if ! grep -q "spoof_system_properties" module/webroot/script.js; then
             echo "::error::spoof_system_properties wiring missing in module/webroot/script.js" >&2; exit 1
           fi
+
+      - name: Brand module
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
+        run: |
           sed -i "s/^name=.*/name=.BRENE - Custom AI/" module/module.prop
           sed -i "s/^author=.*/author=rrr333nnn333, simonpunk \& KOWX712 + Community/" module/module.prop
           if grep -q "^updateJson=" module/module.prop; then
@@ -222,7 +221,6 @@ jobs:
           rm -rf /tmp/upstream_pure
           mkdir -p /tmp/upstream_pure
           git archive upstream/main -- module | tar -x -C /tmp/upstream_pure
-          # deterministic file-level summary; no external AI service, no secrets
           diff -rq /tmp/upstream_pure/module module > /tmp/custom_files.txt 2>&1 || true
           sed -e 's|/tmp/upstream_pure/||g' -e 's|^|- |' /tmp/custom_files.txt > /tmp/local_summary.md || true
           [ -s /tmp/local_summary.md ] || echo "- No local changes against upstream this build." > /tmp/local_summary.md
@@ -245,14 +243,10 @@ jobs:
           PREV_NUM=$(cat BUILD_NUMBER 2>/dev/null || echo 0)
           PREV_NUM=$(printf '%s' "$PREV_NUM" | grep -oE '[0-9]+' | head -1)
           [ -z "$PREV_NUM" ] && PREV_NUM=0
-          # versionCode must NEVER reset: root managers (KernelSU/Magisk/APatch)
-          # detect updates by strictly increasing versionCode, so BUILD_NUMBER
-          # only ever goes up even when the display counter restarts below.
           RUN_NUM=$((PREV_NUM + 1))
           echo "$RUN_NUM" > BUILD_NUMBER
           echo "$UPSTREAM_VER" > LAST_UPSTREAM_VERSION
 
-          # Display counter restarts at 1 on every upstream version bump.
           PREV_CUSTOM_N=$(grep '^version=' module/module.prop | grep -oE 'custom\.[0-9]+' | grep -oE '[0-9]+' | head -1)
           [ -z "$PREV_CUSTOM_N" ] && PREV_CUSTOM_N=0
           if [ "$UPSTREAM_VER" != "$LAST_VER" ]; then
@@ -262,22 +256,39 @@ jobs:
             [ "$CUSTOM_N" -lt 1 ] && CUSTOM_N=1
           fi
 
-          RANGE_TO="${{ steps.diff.outputs.new_sha }}"
-          [ -n "$RANGE_TO" ] || RANGE_TO="${{ steps.pre.outputs.sha }}"
-          UPSTREAM_LOG=$(git log --pretty=format:"- %s" "${{ steps.pre.outputs.sha }}..$RANGE_TO" -- module ':!CHANGELOG.md' 2>/dev/null || echo "")
-          [ -z "$UPSTREAM_LOG" ] && UPSTREAM_LOG="- (manual rebuild, no new upstream commits)"
-
           BUILD_VERSION="${UPSTREAM_VER}-custom.${CUSTOM_N}"
 
+          PREV_TAG=$(git describe --tags --abbrev=0 --match="v*" 2>/dev/null || echo "")
           {
             echo "## ${BUILD_VERSION} - ${DATE}"
             echo ""
-            echo "### Synced from upstream BRENE"
-            echo "$UPSTREAM_LOG"
+            echo "### Module changes since previous release"
+            if [ -n "$PREV_TAG" ]; then
+              LOCAL_LOG=$(git log --no-merges --pretty=format:"- %s" "${PREV_TAG}..HEAD" -- module .github | grep -vE '^- (release|chore): ' || true)
+              [ -n "$LOCAL_LOG" ] && echo "$LOCAL_LOG" || echo "- No module changes since ${PREV_TAG}."
+            else
+              echo "- Previous release tag not found; $(git rev-list --count HEAD) commits on ${GITHUB_REF_NAME}."
+            fi
+            echo ""
+            echo "### Upstream BRENE"
+            if git rev-parse -q --verify upstream/main >/dev/null 2>&1; then
+              UP_LOG=$(git log --pretty=format:"- %s" "${{ steps.pre.outputs.sha }}..${{ steps.diff.outputs.new_sha }}" -- module 2>/dev/null | head -20 || true)
+              [ -n "$UP_LOG" ] && echo "$UP_LOG" || echo "- Already up to date with upstream ${UPSTREAM_VER}."
+            else
+              echo "- Manual rebuild; upstream not fetched this run."
+            fi
             echo ""
             echo "### Local customizations"
-            cat /tmp/local_summary.md 2>/dev/null || echo "- (no upstream comparison this run; built from branch as-is)"
+            if [ -f /tmp/local_summary.md ]; then
+              cat /tmp/local_summary.md
+            else
+              echo "- Not compared this run (built from branch as-is)."
+            fi
             echo ""
+            echo "### Module"
+            echo "- Version: ${BUILD_VERSION} (versionCode ${RUN_NUM})"
+            grep '^description=' module/module.prop | sed 's/^description=/- /'
+            echo "- Source: https://github.com/${{ github.repository }}/tree/${GITHUB_REF_NAME}"
           } > /tmp/new_entry.md
 
           cat /tmp/new_entry.md CHANGELOG.md > /tmp/full_changelog.md
@@ -319,10 +330,46 @@ jobs:
           fi
           git push origin HEAD
 
+      - name: Publish update.json and CHANGELOG.md to main
+        if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_VERSION: ${{ steps.build.outputs.build_version }}
+        run: |
+          python3 << 'PYEOF'
+          import base64, json, os, urllib.request
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tok = os.environ["GH_TOKEN"]
+          ver = os.environ["BUILD_VERSION"]
+          hdr = {"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json", "User-Agent": "sync-and-build"}
+          def api(url, data=None, method="GET"):
+              req = urllib.request.Request(url, data=data, headers=hdr, method=method)
+              try:
+                  with urllib.request.urlopen(req) as r:
+                      return json.loads(r.read().decode())
+              except Exception as e:
+                  print("::warning::%s %s -> %s" % (method, url, e))
+                  return None
+          for path in ("update.json", "CHANGELOG.md"):
+              content = open(path, "rb").read()
+              cur = api("https://api.github.com/repos/%s/contents/%s?ref=main" % (repo, path))
+              body = {"message": "release: %s for %s" % (path, ver), "branch": "main",
+                      "content": base64.b64encode(content).decode()}
+              if isinstance(cur, dict) and cur.get("sha"):
+                  try:
+                      if base64.b64decode(cur.get("content") or b"") == content:
+                          print("%s on main is already current" % path)
+                          continue
+                  except Exception:
+                      pass
+                  body["sha"] = cur["sha"]
+              res = api("https://api.github.com/repos/%s/contents/%s" % (repo, path), data=json.dumps(body).encode(), method="PUT")
+              print("pushed %s to main: %s" % (path, "ok" if res else "failed (see warning above)"))
+          PYEOF
+
       - name: Zip module (only module/ contents at zip root)
         if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
         run: |
-          # NOTE: SOURCE_DATE_EPOCH could pin zip timestamps for reproducibility (not enforced here).
           cd module
           zip -X -r9 "../BRENE-Custom-AI-${{ steps.build.outputs.build_version }}.zip" . -x ".git*" "*.pyc" "__pycache__/*" ".DS_Store*"
           unzip -l "../BRENE-Custom-AI-${{ steps.build.outputs.build_version }}.zip"
@@ -341,7 +388,7 @@ jobs:
 
       - name: Create Release
         if: steps.merge.outputs.conflict != 'true' && inputs.publish == true
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
           tag_name: "${{ steps.build.outputs.build_version }}"
           name: "BRENE Custom AI ${{ steps.build.outputs.build_version }}"
