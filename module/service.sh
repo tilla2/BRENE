@@ -41,6 +41,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     # dynamic variable name (and no eval) is needed. When adding a new
     # config_ key, extend this list.
     case "$k" in
+      config_align_fingerprint_tail) config_align_fingerprint_tail="$v" ;;
       config_brene_logs) config_brene_logs="$v" ;;
       config_custom_uname_kernel_release) config_custom_uname_kernel_release="$v" ;;
       config_custom_uname_kernel_version) config_custom_uname_kernel_version="$v" ;;
@@ -97,6 +98,12 @@ mkdir -p "${PERSISTENT_DIR}"
 
 if [[ "${config_brene_logs}" == "1" ]]; then
         echo "service.sh ✅" >> "${PERSISTENT_DIR}/log.txt"
+fi
+
+# Fingerprint tail alignment: derive id/incremental/flavor from the LIVE fingerprint
+# (e.g. PIF's). Runs after post-fs-data; boot-completed.sh re-asserts (timing race).
+if [[ "${config_align_fingerprint_tail}" == "1" ]]; then
+    brene_align_fingerprint_tail || true
 fi
 
 # Best-effort update for custom kstat entries at a later stage.

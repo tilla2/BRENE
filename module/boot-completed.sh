@@ -43,6 +43,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
     # dynamic variable name (and no eval) is needed. When adding a new
     # config_ key, extend this list.
     case "$k" in
+      config_align_fingerprint_tail) config_align_fingerprint_tail="$v" ;;
       config_brene_logs) config_brene_logs="$v" ;;
       config_custom_uname_kernel_release) config_custom_uname_kernel_release="$v" ;;
       config_custom_uname_kernel_version) config_custom_uname_kernel_version="$v" ;;
@@ -302,6 +303,12 @@ fi
 # Spoof Vendor Security Patch Level Property
 if [[ "${config_spoof_vendor_security_patch_level_property}" == "1" ]]; then
    brene_spoof_vendor_security_patch_props || true
+fi
+
+# Fingerprint tail alignment (re-assert): PIF has written the live fingerprint by
+# now; keep id/incremental/flavor coherent with it (idempotent, writes on change only).
+if [[ "${config_align_fingerprint_tail}" == "1" ]]; then
+    brene_align_fingerprint_tail || true
 fi
 
 ## First we need to wait until files are accessible in /sdcard ##

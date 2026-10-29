@@ -97,6 +97,7 @@ if [ -e "${PERSISTENT_DIR}/config.sh" ]; then
       config_show_refresh_rate) config_show_refresh_rate="$v" ;;
       config_spoof_cmdline_or_bootconfig) config_spoof_cmdline_or_bootconfig="$v" ;;
       config_spoof_date_properties) config_spoof_date_properties="$v" ;;
+      config_spoof_device_name) config_spoof_device_name="$v" ;;
       config_spoof_fingerprint_properties) config_spoof_fingerprint_properties="$v" ;;
       config_spoof_hosts) config_spoof_hosts="$v" ;;
       config_spoof_libstagefright) config_spoof_libstagefright="$v" ;;
@@ -399,6 +400,17 @@ if [[ "${config_spoof_system_properties}" == "1" && "${BRENE_UPTIME_SEC}" -lt 12
         MAIN_MANUFACTURER=$(getprop ro.product.manufacturer)
         MAIN_MODEL=$(getprop ro.product.model)
         MAIN_NAME=$(getprop ro.product.name)
+        # TEE-keybox SKU override: config_spoof_device_name is not a native prop, so
+        # it cannot be synced FROM ro.product.name - when set, it IS the name source
+        # for the whole sync (every partition plus the main prop). Empty/invalid = automation.
+        case "${config_spoof_device_name:-}" in
+        ""|-*|*[!A-Za-z0-9_.-]*) ;;
+        *)
+        MAIN_NAME="${config_spoof_device_name}"
+        if_prop_exits_resetprop_n "ro.product.name" "${MAIN_NAME}"
+        [ "${config_brene_logs}" = "1" ] && brene_log "[sync_prop]: device-name override -> ${MAIN_NAME} (all partitions)"
+        ;;
+        esac
 
         # Base fields owned by Spoof System Properties; fingerprint/date/date.utc
         # are owned by their own toggles (full control per button).

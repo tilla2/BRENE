@@ -260,6 +260,32 @@ brene_spoof_date_props() {
 	if_prop_exits_resetprop_n "ro.vendor_dlkm.build.date" "${new_date_value}"
 }
 
+# brene_align_fingerprint_tail : derive Build sub-fields from the LIVE fingerprint.
+# Fills ro.build.id / ro.build.version.incremental / ro.build.flavor from whatever
+# ro.build.fingerprint currently is (e.g. PIF's), so those fields stop contradicting
+# the spoofed fingerprint. Never touches the fingerprint itself, and never writes any
+# TEE-attested identity field (brand/device/product/model/serial stay untouched).
+brene_align_fingerprint_tail() {
+    local fp seg rest id incr type prod
+    fp=$(resetprop ro.build.fingerprint)
+    [ -n "${fp}" ] || return 0
+    seg=${fp#*:}
+    rest=${seg#*/}
+    id=${rest%%/*}
+    rest=${rest#*/}
+    incr=${rest%%:*}
+    type=${rest#*:}; type=${type%%/*}
+    prod=${fp%%:*}; prod=${prod##*/}
+    [ "${id}" = "${incr}" ] && incr=""
+    case "${id}" in ""|*[!A-Za-z0-9._-]*) id="" ;; esac
+    case "${incr}" in ""|*[!A-Za-z0-9._-]*) incr="" ;; esac
+    case "${type}" in user|userdebug|eng) ;; *) type="" ;; esac
+    [ -n "${id}" ] && [ -n "${prod}" ] && if_prop_exits_resetprop_n "ro.build.id" "${id}"
+    [ -n "${incr}" ] && if_prop_exits_resetprop_n "ro.build.version.incremental" "${incr}"
+    [ -n "${type}" ] && [ -n "${prod}" ] && if_prop_exits_resetprop_n "ro.build.flavor" "${prod}-${type}"
+    [ "${config_brene_logs}" = "1" ] && brene_log "[fingerprint_tail]: id=${id} incremental=${incr} flavor=${prod}-${type}"
+    return 0
+}
 brene_spoof_os_security_patch_props() {
     local patch_year patch_month patch_day patch_month_num prev_month prev_year
     if command -v busybox >/dev/null 2>&1; then
@@ -272,7 +298,11 @@ brene_spoof_os_security_patch_props() {
     patch_month_num=${patch_month#0}; patch_day=${patch_day#0}
     [ -z "${patch_month_num}" ] && patch_month_num=0
     [ -z "${patch_day}" ] && patch_day=0
+    # Unsynced-clock guard: post-fs-data may run before RTC/NTP sync; a 1970-*
+    # SPL gets cached by zygote for the whole boot. Skip until the clock is sane.
+    [ "${patch_year}" -ge 2024 ] 2>/dev/null || return 0
     if [ "${patch_day}" -ge 5 ]; then
+
         if_prop_exits_resetprop_n "ro.build.version.security_patch" "${patch_year}-${patch_month}-01"
     elif [ "${patch_month_num}" -ge 2 ]; then
         prev_month=$(printf "%02d" "$((patch_month_num - 1))")
@@ -295,7 +325,11 @@ brene_spoof_vendor_security_patch_props() {
     patch_month_num=${patch_month#0}; patch_day=${patch_day#0}
     [ -z "${patch_month_num}" ] && patch_month_num=0
     [ -z "${patch_day}" ] && patch_day=0
+    # Unsynced-clock guard: post-fs-data may run before RTC/NTP sync; a 1970-*
+    # SPL gets cached by zygote for the whole boot. Skip until the clock is sane.
+    [ "${patch_year}" -ge 2024 ] 2>/dev/null || return 0
     if [ "${patch_day}" -ge 5 ]; then
+
         if_prop_exits_resetprop_n "ro.vendor.build.security_patch" "${patch_year}-${patch_month}-05"
     elif [ "${patch_month_num}" -ge 2 ]; then
         prev_month=$(printf "%02d" "$((patch_month_num - 1))")

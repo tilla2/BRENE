@@ -51,3 +51,13 @@ config_fix_data_local_tmp_inconsistencies=1
 config_show_refresh_rate=0
 config_disable_child_process_restrictions=1
 config_hide_custom_rom_paths_2=0
+
+# TEE-keybox SKU override for the Build Props Spoofing sync. Empty = automation
+# (name syncs from ro.product.name). When set (e.g. 'myron_eea') the sync writes
+# this name to ro.product.<partition>.name on ALL partitions and to ro.product.name
+# itself, because the value exists on no native partition to sync it from.
+config_spoof_device_name=''
+# Align ro.build.id / ro.build.version.incremental / ro.build.flavor with the LIVE
+# fingerprint (e.g. PIF's) in service.sh + boot-completed.sh. Never touches the
+# fingerprint itself nor any TEE-attested identity field.
+config_align_fingerprint_tail=1
